@@ -14,40 +14,83 @@ import {
   ChevronRight,
   Edit,
   ArrowLeft,
+  Copy,
+  CheckCircle,
 } from 'lucide-react';
+
+// Low stock threshold
+const LOW_STOCK_LIMIT = 5;
 
 // Stock level indicator
 function StockIndicator({ quantity }) {
   if (quantity <= 0) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
         <AlertTriangle className="h-3 w-3" />
         Out of Stock
       </span>
     );
   }
-  if (quantity <= 5) {
+  if (quantity <= LOW_STOCK_LIMIT) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
         <AlertTriangle className="h-3 w-3" />
         Low Stock ({quantity})
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
       In Stock ({quantity})
     </span>
   );
 }
 
+// Copy SKU button
+function CopySKUButton({ sku }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(sku);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="ml-2 p-1 hover:bg-muted rounded transition-colors"
+      title="Copy SKU"
+    >
+      {copied ? (
+        <CheckCircle className="h-3 w-3 text-green-600" />
+      ) : (
+        <Copy className="h-3 w-3 text-muted-foreground" />
+      )}
+    </button>
+  );
+}
+
 // Editable stock input
-function StockInput({ value, onSave, disabled }) {
+function StockInput({ value, onSave, disabled, productStatus }) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState(value);
   const [saving, setSaving] = useState(false);
 
+  // Reset input value when prop value changes
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  const hasChanges = parseInt(inputValue) !== value;
+  const isDisabled = disabled || productStatus !== 'live';
+
   const handleSave = async () => {
+    if (!hasChanges) {
+      setEditing(false);
+      return;
+    }
+    
     setSaving(true);
     try {
       await onSave(parseInt(inputValue) || 0);
@@ -70,7 +113,7 @@ function StockInput({ value, onSave, disabled }) {
         <button
           onClick={() => setInputValue(Math.max(0, (parseInt(inputValue) || 0) - 1))}
           className="p-1 rounded hover:bg-muted"
-          disabled={disabled || saving}
+          disabled={isDisabled || saving}
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -80,22 +123,25 @@ function StockInput({ value, onSave, disabled }) {
           onChange={(e) => setInputValue(e.target.value)}
           min="0"
           className="w-16 px-2 py-1 text-center border rounded focus:outline-none focus:ring-2 focus:ring-primary"
-          disabled={disabled || saving}
+          disabled={isDisabled || saving}
         />
         <button
           onClick={() => setInputValue((parseInt(inputValue) || 0) + 1)}
           className="p-1 rounded hover:bg-muted"
-          disabled={disabled || saving}
+          disabled={isDisabled || saving}
         >
           <Plus className="h-4 w-4" />
         </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="p-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 ml-1"
-        >
-          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        </button>
+        {hasChanges && (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="p-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 ml-1"
+            title="Save changes"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          </button>
+        )}
         <button
           onClick={handleCancel}
           disabled={saving}
@@ -110,21 +156,23 @@ function StockInput({ value, onSave, disabled }) {
   return (
     <button
       onClick={() => setEditing(true)}
-      disabled={disabled}
-      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted transition-colors"
+      disabled={isDisabled}
+      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      title={isDisabled ? (productStatus !== 'live' ? 'Stock editing disabled for non-LIVE products' : 'Editing disabled') : 'Click to edit stock'}
     >
       <span className="font-medium">{value}</span>
-      <Edit className="h-3 w-3 text-muted-foreground" />
+      {!isDisabled && <Edit className="h-3 w-3 text-muted-foreground" />}
     </button>
   );
 }
 
-// Variant row - for size-based variants (footwear model)
-// In current data model: each variant IS a size, options are just metadata
+// Variant row - for size-based variants
+// Stock is stored at the variant level (variant.stock_quantity)
 function VariantRow({ product, variant, onStockUpdate }) {
-  // For size-based variants, stock is on the variant itself
+  // Stock is directly on the variant
   const stockQuantity = variant.stock_quantity || 0;
-  const sizeValue = variant.size || variant.options?.[0]?.option_value || 'N/A';
+  const sizeValue = variant.size || variant.variant_name || 'N/A';
+  const price = variant.price_override || product.price || 0;
 
   return (
     <tr className="border-b hover:bg-muted/30">
@@ -136,9 +184,14 @@ function VariantRow({ product, variant, onStockUpdate }) {
           <span className="font-medium">Size {sizeValue}</span>
         </div>
       </td>
-      <td className="py-3 px-4 text-sm text-muted-foreground">{variant.sku || '-'}</td>
       <td className="py-3 px-4">
-        {variant.price_override ? `₹${variant.price_override}` : '-'}
+        <div className="flex items-center text-sm text-muted-foreground font-mono">
+          {variant.sku || '-'}
+          {variant.sku && <CopySKUButton sku={variant.sku} />}
+        </div>
+      </td>
+      <td className="py-3 px-4">
+        ₹{price.toLocaleString('en-IN')}
       </td>
       <td className="py-3 px-4">
         <StockIndicator quantity={stockQuantity} />
@@ -146,9 +199,8 @@ function VariantRow({ product, variant, onStockUpdate }) {
       <td className="py-3 px-4 text-right">
         <StockInput
           value={stockQuantity}
-          onSave={(newStock) =>
-            onStockUpdate(product.id, variant.id, variant.options?.[0]?.id || variant.id, newStock)
-          }
+          productStatus={product.status}
+          onSave={(newStock) => onStockUpdate(product.id, variant.id, newStock)}
         />
       </td>
     </tr>
@@ -158,15 +210,31 @@ function VariantRow({ product, variant, onStockUpdate }) {
 // Product stock card
 function ProductStockCard({ product, onStockUpdate, expanded, onToggle }) {
   const variants = product.variants || [];
-  // For size-based variants, stock is directly on each variant
-  const totalStock = variants.reduce(
-    (sum, v) => sum + (v.stock_quantity || 0),
-    0
+  // Stock is directly on each variant (variant.stock_quantity)
+  const totalStock = variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
+
+  // Check if any variant is low stock (has stock but <= threshold)
+  const hasLowStock = variants.some(
+    v => v.stock_quantity > 0 && v.stock_quantity <= LOW_STOCK_LIMIT
   );
 
   // Get primary image from media array
   const primaryMedia = product.media?.find(m => m.is_primary) || product.media?.[0];
   const thumbnailUrl = product.thumbnail_url || primaryMedia?.media_url || primaryMedia?.cloudinary_url;
+
+  // Check if product is non-LIVE
+  const isNonLive = product.status && product.status !== 'live';
+
+  // Determine status badge (priority: Out of Stock > Low Stock > In Stock)
+  const getStatusBadge = () => {
+    if (totalStock === 0) {
+      return <StockIndicator quantity={0} />;
+    } else if (hasLowStock) {
+      return <StockIndicator quantity={LOW_STOCK_LIMIT} />;
+    } else {
+      return <StockIndicator quantity={totalStock} />;
+    }
+  };
 
   return (
     <div className="bg-card rounded-xl border overflow-hidden">
@@ -196,14 +264,22 @@ function ProductStockCard({ product, onStockUpdate, expanded, onToggle }) {
                   <span className="text-xs text-muted-foreground">({product.color})</span>
                 </div>
               )}
+              {isNonLive && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
+                  {product.status}
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground">
-              {variants.length} size(s) • Total stock: {totalStock}
+              {product.catalogue_name && (
+                <span className="font-medium">{product.catalogue_name} · </span>
+              )}
+              {variants.length} size(s) · Total: {totalStock} units
             </p>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <StockIndicator quantity={totalStock} />
+          {getStatusBadge()}
           {expanded ? (
             <ChevronDown className="h-5 w-5 text-muted-foreground" />
           ) : (
@@ -214,6 +290,13 @@ function ProductStockCard({ product, onStockUpdate, expanded, onToggle }) {
 
       {expanded && (
         <div className="border-t">
+          {isNonLive && (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 p-3">
+              <p className="text-sm text-yellow-800 dark:text-yellow-400">
+                <strong>Note:</strong> Stock editing is disabled because this product status is <strong className="uppercase">{product.status}</strong>. Only LIVE products can have stock edited.
+              </p>
+            </div>
+          )}
           {variants.length > 0 ? (
             <table className="w-full">
               <thead className="bg-muted/50 text-xs text-muted-foreground">
@@ -313,10 +396,11 @@ export default function AdminStock() {
     fetchProducts();
   }, []);
 
-  const handleStockUpdate = async (productId, variantId, optionId, newStock) => {
-    await AdminStockAPI.updateStock(productId, variantId, optionId, newStock);
+  const handleStockUpdate = async (productId, variantId, newStock) => {
+    // Update stock via API - stock is at variant level
+    await AdminStockAPI.updateStock(productId, variantId, newStock);
     
-    // Update local state - for size-based variants, stock is on the variant itself
+    // Update local state
     setProducts((prev) =>
       prev.map((product) => {
         if (product.id !== productId) return product;
@@ -327,11 +411,6 @@ export default function AdminStock() {
             return {
               ...variant,
               stock_quantity: newStock,
-              // Also update options if present
-              options: variant.options?.map((option) => {
-                if (option.id !== optionId) return option;
-                return { ...option, stock_quantity: newStock };
-              }),
             };
           }),
         };
@@ -359,13 +438,18 @@ export default function AdminStock() {
     setExpandedProducts(new Set());
   };
 
-  // Calculate total stock for a product
+  // Calculate total stock for a product (from variants)
   const getProductStock = (product) => {
     return (product.variants || []).reduce(
-      (sum, v) =>
-        sum +
-        (v.options || []).reduce((optSum, opt) => optSum + (opt.stock_quantity || 0), 0),
+      (sum, v) => sum + (v.stock_quantity || 0),
       0
+    );
+  };
+
+  // Check if product has low stock (any variant is low)
+  const hasProductLowStock = (product) => {
+    return (product.variants || []).some(
+      v => v.stock_quantity > 0 && v.stock_quantity <= LOW_STOCK_LIMIT
     );
   };
 
@@ -385,7 +469,10 @@ export default function AdminStock() {
 
       // Stock filter
       const stock = getProductStock(product);
-      if (filter === 'low' && stock > 5) return false;
+      if (filter === 'low') {
+        // Product is low if it has stock AND any variant is low
+        if (stock === 0 || !hasProductLowStock(product)) return false;
+      }
       if (filter === 'out' && stock > 0) return false;
 
       return true;
@@ -397,12 +484,13 @@ export default function AdminStock() {
       return stockA - stockB;
     });
 
-  // Stats
+  // Stats - count PRODUCTS, not variants
   const stats = {
     total: products.length,
     lowStock: products.filter((p) => {
       const stock = getProductStock(p);
-      return stock > 0 && stock <= 5;
+      // Product is low if it has stock AND any variant is low
+      return stock > 0 && hasProductLowStock(p);
     }).length,
     outOfStock: products.filter((p) => getProductStock(p) === 0).length,
   };
@@ -473,14 +561,14 @@ export default function AdminStock() {
         <button
           onClick={() => setFilter('low')}
           className={`p-4 rounded-xl border transition-colors ${
-            filter === 'low' ? 'bg-yellow-50 border-yellow-400' : 'bg-card hover:bg-muted'
+            filter === 'low' ? 'bg-yellow-50 border-yellow-400 dark:bg-yellow-900/20' : 'bg-card hover:bg-muted'
           }`}
         >
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-8 w-8 text-yellow-500" />
             <div className="text-left">
-              <p className="text-2xl font-bold text-yellow-700">{stats.lowStock}</p>
-              <p className="text-sm text-yellow-600">Low Stock (≤5)</p>
+              <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-400">{stats.lowStock}</p>
+              <p className="text-sm text-yellow-600 dark:text-yellow-500">Low Stock (≤{LOW_STOCK_LIMIT})</p>
             </div>
           </div>
         </button>
@@ -488,17 +576,24 @@ export default function AdminStock() {
         <button
           onClick={() => setFilter('out')}
           className={`p-4 rounded-xl border transition-colors ${
-            filter === 'out' ? 'bg-red-50 border-red-400' : 'bg-card hover:bg-muted'
+            filter === 'out' ? 'bg-red-50 border-red-400 dark:bg-red-900/20' : 'bg-card hover:bg-muted'
           }`}
         >
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-8 w-8 text-red-500" />
             <div className="text-left">
-              <p className="text-2xl font-bold text-red-700">{stats.outOfStock}</p>
-              <p className="text-sm text-red-600">Out of Stock</p>
+              <p className="text-2xl font-bold text-red-700 dark:text-red-400">{stats.outOfStock}</p>
+              <p className="text-sm text-red-600 dark:text-red-500">Out of Stock</p>
             </div>
           </div>
         </button>
+      </div>
+
+      {/* Helper text */}
+      <div className="bg-muted/50 border border-border rounded-lg p-3">
+        <p className="text-sm text-muted-foreground">
+          <strong>Low Stock threshold:</strong> ≤ {LOW_STOCK_LIMIT} units per size. Stock can only be edited at the size level within each product.
+        </p>
       </div>
 
       {/* Search and controls */}

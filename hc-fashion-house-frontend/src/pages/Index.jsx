@@ -8,7 +8,8 @@ import { BrandsMarquee } from '@/components/ui/brands-marquee';
 import Layout from '@/components/layout/Layout';
 import { useTheme } from '@/contexts/ThemeContext';
 import FlipCard from '@/components/products/FlipCard';
-import { useFeaturedProducts } from '@/hooks/useProducts';
+import { useBestsellerProducts } from '@/hooks/useProducts';
+import { AdminBrandAPI } from '@/lib/adminApi';
 
 // Import shoe images
 import heroShoe1 from '@/assets/shoes/hero-shoe-1.png';
@@ -76,23 +77,6 @@ const segments = [
   { id: 'women', label: 'Women', image: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=800&q=80', color: 'gradient-women' },
   { id: 'kids', label: 'Kids', image: 'https://images.unsplash.com/photo-1555274175-75f79b09d5b8?w=800&q=80', color: 'gradient-kids' },
 ];
-
-// Brand data with SVG logos - using reliable CDN sources
-const brandsData = [
-  { name: 'Nike', logo: 'https://cdn.worldvectorlogo.com/logos/nike-4.svg' },
-  { name: 'Adidas', logo: 'https://cdn.worldvectorlogo.com/logos/adidas-9.svg' },
-  { name: 'Puma', logo: 'https://cdn.worldvectorlogo.com/logos/puma-logo.svg' },
-  { name: 'Reebok', logo: 'https://cdn.worldvectorlogo.com/logos/reebok-2019.svg' },
-  { name: 'New Balance', logo: 'https://cdn.worldvectorlogo.com/logos/new-balance-2.svg' },
-  { name: 'Converse', logo: 'https://cdn.worldvectorlogo.com/logos/converse-3.svg' },
-  { name: 'Vans', logo: 'https://cdn.worldvectorlogo.com/logos/vans-1.svg' },
-  { name: 'Jordan', logo: 'https://cdn.worldvectorlogo.com/logos/air-jordan-1.svg' },
-  { name: 'Skechers', logo: 'https://cdn.worldvectorlogo.com/logos/skechers-1.svg' },
-  { name: 'Fila', logo: 'https://cdn.worldvectorlogo.com/logos/fila-4.svg' },
-];
-
-// Simple brand names for backward compatibility
-const brands = brandsData.map(b => b.name);
 
 // Expanded featured products with segments, sizes, colors
 const featuredProducts = [
@@ -310,8 +294,12 @@ export default function Index() {
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [trendingPhraseIndex, setTrendingPhraseIndex] = useState(0);
   
-  // Fetch featured products from API
-  const { products: apiProducts, loading: productsLoading } = useFeaturedProducts(20);
+  // Fetch brands from API
+  const [brands, setBrands] = useState([]);
+  const [brandsLoading, setBrandsLoading] = useState(true);
+  
+  // Fetch bestseller products from API
+  const { products: apiProducts, loading: productsLoading } = useBestsellerProducts(20);
   
   // Use API products if available, fallback to mock data
   const allFeaturedProducts = useMemo(() => {
@@ -332,6 +320,33 @@ export default function Index() {
     "Shopping Made Easy"
   ];
   const [serviceHeadingIndex, setServiceHeadingIndex] = useState(0);
+  
+  // Fetch brands from backend
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        setBrandsLoading(true);
+        const response = await AdminBrandAPI.list({ isActive: true });
+        // Transform brands to match marquee format
+        const transformedBrands = response
+          .filter(brand => brand.is_active)
+          .map(brand => ({
+            name: brand.name,
+            logo: brand.logo_url || brand.logo
+          }));
+        setBrands(transformedBrands);
+      } catch (error) {
+        console.error('Failed to fetch brands:', error);
+        // Keep brands empty on error
+        setBrands([]);
+      } finally {
+        setBrandsLoading(false);
+      }
+    };
+    
+    fetchBrands();
+  }, []);
+  
   useEffect(() => {
     const interval = setInterval(() => {
       setServiceHeadingIndex((prev) => (prev + 1) % serviceHeadings.length);
@@ -520,7 +535,7 @@ export default function Index() {
   return (
     <Layout>
       {/* Hero Section - Carousel Style */}
-      <section className="relative min-h-[100svh] md:min-h-[85vh] bg-background overflow-hidden">
+      <section className="relative min-h-[100svh] md:min-h-[75vh] bg-background overflow-hidden pt-16 md:pt-20">
         {/* Infinite Grid Background with Floating Shoes */}
         <InfiniteGridBackground
           gridSize={50}
@@ -532,7 +547,7 @@ export default function Index() {
             {
               src: heroShoe1,
               alt: "Floating shoe 1",
-              className: "w-16 md:w-24 lg:w-32 hidden md:block",
+              className: "w-24 md:w-32 lg:w-40 hidden md:block",
               delay: 0.5,
               duration: 6,
               initialPosition: { x: "5%", y: "15%" }
@@ -540,7 +555,7 @@ export default function Index() {
             {
               src: heroShoe2,
               alt: "Floating shoe 2", 
-              className: "w-12 md:w-20 lg:w-28 hidden lg:block",
+              className: "w-20 md:w-28 lg:w-36 hidden lg:block",
               delay: 1,
               duration: 7,
               initialPosition: { x: "85%", y: "60%" }
@@ -548,7 +563,7 @@ export default function Index() {
             {
               src: heroShoe3,
               alt: "Floating shoe 3",
-              className: "w-14 md:w-20 lg:w-24 hidden md:block",
+              className: "w-20 md:w-28 lg:w-32 hidden md:block",
               delay: 1.5,
               duration: 5.5,
               initialPosition: { x: "75%", y: "10%" }
@@ -556,7 +571,7 @@ export default function Index() {
             {
               src: heroShoe4,
               alt: "Floating shoe 4",
-              className: "w-10 md:w-16 lg:w-20 hidden lg:block",
+              className: "w-16 md:w-24 lg:w-28 hidden lg:block",
               delay: 2,
               duration: 6.5,
               initialPosition: { x: "10%", y: "70%" }
@@ -564,7 +579,7 @@ export default function Index() {
             {
               src: heroShoe5,
               alt: "Floating shoe 5",
-              className: "w-12 md:w-18 lg:w-24 hidden xl:block",
+              className: "w-20 md:w-24 lg:w-32 hidden xl:block",
               delay: 0.8,
               duration: 5,
               initialPosition: { x: "88%", y: "35%" }
@@ -572,10 +587,10 @@ export default function Index() {
           ]}
         />
         
-        <div className="container h-full relative z-10">
-          <div className="grid lg:grid-cols-2 gap-0 md:gap-4 items-center min-h-[100svh] md:min-h-[85vh] py-2 md:py-4">
+        <div className="container min-h-[calc(75vh-5rem)] relative z-10">
+          <div className="grid lg:grid-cols-2 gap-0 md:gap-4 items-center min-h-[calc(75vh-5rem)] py-2 md:py-4">
             {/* Left Content - Text */}
-            <div className="relative z-10 order-2 lg:order-1 text-center lg:text-left mt-0 -translate-y-16 md:-translate-y-32 mb-0 pb-0">
+            <div className="relative z-10 order-2 lg:order-1 text-center lg:text-left mt-0 -translate-y-16 md:translate-y-0 mb-0 pb-0">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={currentSlide}
@@ -788,7 +803,7 @@ export default function Index() {
           </button>
 
           {/* Navigation Dots */}
-          <div className="absolute bottom-28 md:bottom-48 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-3">
+          <div className="absolute bottom-12 md:bottom-10 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-3 z-30">
             {heroSlides.map((_, index) => (
               <button
                 key={index}
@@ -806,16 +821,18 @@ export default function Index() {
       </section>
 
       {/* Brands Marquee */}
-      <section className="mt-[-3rem] md:mt-[-4rem] mb-4 md:mb-8 pt-6 md:pt-8 bg-background/80 backdrop-blur-sm">
-        <BrandsMarquee 
-          brands={brandsData}
-          speed={15}
-          mobileSpeed={12}
-          reverse
-          pauseOnHover
-          title="Our Trusted Footwear Brands"
-          subtitle="Shop From The Best"
-        />
+      <section className="mt-0 md:mt-2 mb-4 md:mb-8 pt-2 md:pt-4 bg-background/80 backdrop-blur-sm">
+        {!brandsLoading && brands.length > 0 && (
+          <BrandsMarquee 
+            brands={brands}
+            speed={15}
+            mobileSpeed={12}
+            reverse
+            pauseOnHover
+            title="Our Trusted Footwear Brands"
+            subtitle="Shop From The Best"
+          />
+        )}
       </section>
 
       {/* Shop by Category Section */}

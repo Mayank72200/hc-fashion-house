@@ -41,6 +41,9 @@ import {
   AdminProducts,
   AdminProductForm,
   AdminCategories,
+  AdminCatalogues,
+  AdminBrands,
+  AdminMedia,
   AdminStock,
   AdminOrders,
 } from "./pages/admin";
@@ -94,6 +97,9 @@ const App = () => {
                       <Route path="products/new" element={<AdminProductForm />} />
                       <Route path="products/:id/edit" element={<AdminProductForm />} />
                       <Route path="categories" element={<AdminCategories />} />
+                      <Route path="catalogues" element={<AdminCatalogues />} />
+                      <Route path="brands" element={<AdminBrands />} />
+                      <Route path="media" element={<AdminMedia />} />
                       <Route path="stock" element={<AdminStock />} />
                       <Route path="orders" element={<AdminOrders />} />
                     </Route>

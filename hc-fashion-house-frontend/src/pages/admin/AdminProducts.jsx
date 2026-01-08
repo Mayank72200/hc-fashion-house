@@ -16,9 +16,12 @@ import {
   CheckCircle,
   FileEdit,
   Archive,
+  Tags,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -48,6 +51,12 @@ import { AdminAPI } from '@/lib/api';
 // Constants
 // ========================
 
+const TAG_OPTIONS = [
+  'New Arrival', 'Best Seller', 'Limited Edition', 'Sale', 
+  'Trending', 'Exclusive', 'Premium', 'Eco-Friendly',
+  'Comfortable', 'Lightweight', 'Waterproof', 'Breathable'
+];
+
 const COLOR_MAP = {
   'Black': '#000000',
   'White': '#FFFFFF',
@@ -70,43 +79,63 @@ const COLOR_MAP = {
  * Transform API product data to the format expected by the UI
  */
 function transformProduct(product) {
-  // Get primary image from media
+  // Get primary image from media_assets or media
   let image = null;
-  if (product.media && product.media.length > 0) {
-    const primaryMedia = product.media.find(m => m.is_primary) || product.media[0];
-    image = primaryMedia.media_url;
+  const mediaAssets = product.media_assets || product.media || [];
+  if (mediaAssets.length > 0) {
+    const primaryMedia = mediaAssets.find(m => m.is_primary) || mediaAssets[0];
+    image = primaryMedia.cloudinary_url || primaryMedia.media_url;
   }
 
-  // Calculate total stock from variants
+  // Calculate total stock from variants and their options
   let totalStock = 0;
   let sizes = [];
   if (product.variants && product.variants.length > 0) {
     product.variants.forEach(v => {
-      totalStock += v.stock_quantity || 0;
-      if (v.size && !sizes.includes(v.size)) {
-        sizes.push(v.size);
+      // Stock is stored in options (sizes), not directly on variant
+      if (v.options && v.options.length > 0) {
+        v.options.forEach(opt => {
+          totalStock += opt.stock_quantity || 0;
+          if (opt.option_value && !sizes.includes(opt.option_value)) {
+            sizes.push(opt.option_value);
+          }
+        });
+      }
+      // Fallback to variant_name (size) if no options
+      if (v.variant_name && !sizes.includes(v.variant_name)) {
+        sizes.push(v.variant_name);
+        totalStock += v.stock_quantity || 0;
       }
     });
   }
 
+  // Get tags array
+  let tags = [];
+  if (Array.isArray(product.tags)) {
+    tags = product.tags;
+  } else if (typeof product.tags === 'string' && product.tags) {
+    tags = product.tags.split(',').map(t => t.trim()).filter(Boolean);
+  }
+
   return {
     id: product.id,
-    name: product.product_name || product.name || 'Unnamed Product',
-    article: product.product_name || product.name || '',
+    name: product.name || 'Unnamed Product',
+    article: product.catalogue_name || product.name || '',
     color: product.color || 'N/A',
     colorHex: product.color_hex || COLOR_MAP[product.color] || null,
-    brand: product.brand?.brand_name || product.brand_name || 'Unknown',
-    sku: product.sku || product.variants?.[0]?.sku || 'N/A',
+    brand: product.brand?.name || product.brand_name || 'Unknown',
+    sku: product.variants?.[0]?.sku || 'N/A',
     // API returns price (selling price) and mrp (MRP)
     price: product.price || 0,
     mrp: product.mrp || product.price || 0,
     status: product.status || 'draft',
     // Use catalogue_name from API response
     category: product.catalogue_name || product.catalogue?.name || 'Uncategorized',
-    gender: product.gender || 'Unisex',
+    gender: product.gender || 'unisex',
     totalStock,
     sizes: sizes.sort((a, b) => parseFloat(a) - parseFloat(b)),
     image,
+    tags,
     createdAt: product.created_at ? new Date(product.created_at).toISOString().split('T')[0] : 'N/A',
   };
 }
@@ -149,15 +178,186 @@ function ColorBadge({ color }) {
 
 function StockIndicator({ stock }) {
   const stockClass = stock === 0 
-    ? 'text-red-600 dark:text-red-400' 
+    ? 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800' 
     : stock < 10 
-      ? 'text-yellow-600 dark:text-yellow-400'
-      : 'text-green-600 dark:text-green-400';
+      ? 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800'
+      : 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800';
+
+  const stockIcon = stock === 0 ? '⚠️' : stock < 10 ? '⚡' : '✓';
 
   return (
-    <span className={`font-medium ${stockClass}`}>
-      {stock} units
-    </span>
+    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-medium text-sm ${stockClass}`}>
+      <span>{stockIcon}</span>
+      <span>{stock} units</span>
+      <span className="text-xs opacity-75">(all sizes)</span>
+    </div>
+  );
+}
+
+function TagsBadge({ tags }) {
+  if (!tags || tags.length === 0) return <span className="text-sm text-muted-foreground">No tags</span>;
+  
+  const displayTags = tags.slice(0, 2);
+  const remaining = tags.length - 2;
+  
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {displayTags.map((tag, i) => (
+        <span 
+          key={i}
+          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+        >
+          {tag}
+        </span>
+      ))}
+      {remaining > 0 && (
+        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
+          +{remaining}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ========================
+// Tag Management Dialog
+// ========================
+
+function TagManagementDialog({ product, open, onOpenChange, onSave }) {
+  const [selectedTags, setSelectedTags] = useState(product?.tags || []);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (product) {
+      setSelectedTags(product.tags || []);
+    }
+  }, [product]);
+
+  const handleToggleTag = (tag) => {
+    // Normalize tag for comparison (lowercase, no spaces)
+    const normalizedTag = tag.toLowerCase().replace(/\s+/g, '');
+    const normalizedSelected = selectedTags.map(t => t.toLowerCase().replace(/\s+/g, ''));
+    
+    if (normalizedSelected.includes(normalizedTag)) {
+      setSelectedTags(selectedTags.filter(t => 
+        t.toLowerCase().replace(/\s+/g, '') !== normalizedTag
+      ));
+    } else {
+      setSelectedTags([...selectedTags, tag]);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // Normalize tags before saving - remove spaces and lowercase
+      const normalizedTags = selectedTags.map(t => t.toLowerCase().replace(/\s+/g, ''));
+      await onSave(product.id, { tags: normalizedTags });
+      onOpenChange(false);
+    } catch (error) {
+      console.error('Failed to save:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!product) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Tags className="w-5 h-5" />
+            Manage Product Tags
+          </DialogTitle>
+          <DialogDescription>
+            Update product tags for {product.name}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-4">
+          {/* Product Info */}
+          <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
+            {product.image ? (
+              <img
+                src={product.image}
+                alt={product.name}
+                className="w-16 h-16 rounded-lg object-cover border border-border"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center border border-border">
+                <Package className="w-8 h-8 text-muted-foreground" />
+              </div>
+            )}
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">{product.name}</h3>
+              <p className="text-sm text-muted-foreground">SKU: {product.sku}</p>
+              <p className="text-sm text-muted-foreground">{product.color} • {product.brand}</p>
+            </div>
+          </div>
+
+          {/* Tag Management */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Tags className="w-4 h-4 text-primary" />
+              <Label className="text-base font-semibold">Product Tags</Label>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Select tags to categorize this product for homepage sections and filters
+            </p>
+            <div className="flex flex-wrap gap-2 p-4 bg-muted/30 rounded-lg border border-border">
+              {TAG_OPTIONS.map((tag) => {
+                const normalizedTag = tag.toLowerCase().replace(/\s+/g, '');
+                const normalizedSelected = selectedTags.map(t => t.toLowerCase().replace(/\s+/g, ''));
+                const isSelected = normalizedSelected.includes(normalizedTag);
+                
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => handleToggleTag(tag)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                      isSelected
+                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                        : 'bg-background text-foreground border-border hover:border-primary/50 hover:bg-muted'
+                    }`}
+                  >
+                    {tag}
+                    {isSelected && <X className="w-3 h-3" />}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedTags.length > 0 && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CheckCircle className="w-4 h-4 text-green-500" />
+                <span>{selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''} selected</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                Save Changes
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -175,6 +375,8 @@ export default function AdminProducts() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState(null);
+  const [stockTagDialogOpen, setStockTagDialogOpen] = useState(false);
+  const [productToManage, setProductToManage] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -231,6 +433,13 @@ export default function AdminProducts() {
     
     return matchesSearch && matchesStatus && matchesGender;
   });
+
+  // Group products by catalogue for visual grouping
+  const catalogueColorCounts = filteredProducts.reduce((acc, product) => {
+    const catalogueName = product.article || 'Uncategorized';
+    acc[catalogueName] = (acc[catalogueName] || 0) + 1;
+    return acc;
+  }, {});
 
   // Pagination
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -291,6 +500,40 @@ export default function AdminProducts() {
         description: err.message || 'Failed to update product status',
         variant: 'destructive',
       });
+    }
+  };
+
+  const handleManageTags = (product) => {
+    setProductToManage(product);
+    setStockTagDialogOpen(true);
+  };
+
+  const handleSaveTags = async (productId, updates) => {
+    try {
+      // Update tags via API
+      if (updates.tags) {
+        await AdminAPI.updateProduct(productId, { tags: updates.tags });
+      }
+
+      // Update tags in local state
+      setProducts(products.map(p => 
+        p.id === productId ? { ...p, tags: updates.tags || p.tags } : p
+      ));
+
+      toast({
+        title: 'Tags Updated',
+        description: 'Product tags have been updated successfully.',
+      });
+
+      fetchProducts(); // Refresh to get latest data
+    } catch (err) {
+      console.error('Failed to update tags:', err);
+      toast({
+        title: 'Update Failed',
+        description: err.message || 'Failed to update product tags',
+        variant: 'destructive',
+      });
+      throw err;
     }
   };
 
@@ -400,11 +643,11 @@ export default function AdminProducts() {
             <thead>
               <tr className="bg-muted/50 border-b border-border">
                 <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Product</th>
+                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Article / Catalogue</th>
+                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Brand</th>
                 <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Color</th>
-                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Article</th>
-                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Category</th>
                 <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Price</th>
-                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Stock</th>
+                <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Total Stock</th>
                 <th className="text-left py-4 px-4 font-semibold text-sm text-muted-foreground">Status</th>
                 <th className="text-right py-4 px-4 font-semibold text-sm text-muted-foreground">Actions</th>
               </tr>
@@ -443,21 +686,24 @@ export default function AdminProducts() {
                       )}
                       <div>
                         <p className="font-medium text-foreground">{product.name}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{product.sku}</p>
                       </div>
                     </div>
                   </td>
                   <td className="py-4 px-4">
-                    <ColorBadge color={product.color} />
-                  </td>
-                  <td className="py-4 px-4">
-                    <span className="text-sm text-foreground">{product.article}</span>
-                  </td>
-                  <td className="py-4 px-4">
-                    <div>
-                      <span className="text-sm text-foreground">{product.category}</span>
-                      <p className="text-xs text-muted-foreground">{product.gender}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-foreground">{product.article || product.category}</span>
+                      {catalogueColorCounts[product.article] > 1 && (
+                        <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          {catalogueColorCounts[product.article]} colors
+                        </span>
+                      )}
                     </div>
+                  </td>
+                  <td className="py-4 px-4">
+                    <span className="text-sm text-foreground">{product.brand}</span>
+                  </td>
+                  <td className="py-4 px-4">
+                    <ColorBadge color={product.color} />
                   </td>
                   <td className="py-4 px-4">
                     <div>
@@ -475,8 +721,22 @@ export default function AdminProducts() {
                   </td>
                   <td className="py-4 px-4">
                     <div className="flex items-center justify-end gap-1">
+                      <Link to={`/admin/stock?product=${product.id}`}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="Manage Stock">
+                          <Package className="w-4 h-4" />
+                        </Button>
+                      </Link>
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleManageTags(product)}
+                        title="Manage Tags"
+                      >
+                        <Tags className="w-4 h-4" />
+                      </Button>
                       <Link to={`/admin/products/${product.id}/edit`}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit Product">
                           <Edit className="w-4 h-4" />
                         </Button>
                       </Link>
@@ -491,9 +751,9 @@ export default function AdminProducts() {
                             <Eye className="w-4 h-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Package className="w-4 h-4 mr-2" />
-                            Manage Stock
+                          <DropdownMenuItem onClick={() => handleManageTags(product)}>
+                            <Tags className="w-4 h-4 mr-2" />
+                            Manage Tags
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           {/* Status Change Options */}
@@ -594,6 +854,14 @@ export default function AdminProducts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Tag Management Dialog */}
+      <TagManagementDialog
+        product={productToManage}
+        open={stockTagDialogOpen}
+        onOpenChange={setStockTagDialogOpen}
+        onSave={handleSaveTags}
+      />
     </div>
   );
 }

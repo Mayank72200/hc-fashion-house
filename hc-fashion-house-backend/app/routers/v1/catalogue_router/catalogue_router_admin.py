@@ -14,7 +14,7 @@ from models.catalogue_models import (
     # Platform models
     PlatformCreate, PlatformUpdate, PlatformResponse,
     # Brand models
-    BrandCreate, BrandUpdate, BrandResponse,
+    BrandCreate, BrandUpdate, BrandResponse, BrandWithProductCount,
     # Category models
     CategoryCreate, CategoryUpdate, CategoryResponse,
     # Catalogue models
@@ -95,7 +95,7 @@ def delete_platform(platform_id: int, db: Session = Depends(get_db)):
 # Brand Admin Endpoints
 # ========================
 
-@router.get("/brands", response_model=List[BrandResponse])
+@router.get("/brands", response_model=List[BrandWithProductCount])
 def list_brands(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     search: Optional[str] = Query(None, description="Search by brand name"),
@@ -103,9 +103,23 @@ def list_brands(
     limit: int = Query(100, ge=1, le=500, description="Maximum number of records to return"),
     db: Session = Depends(get_db)
 ):
-    """List all brands"""
+    """List all brands with product counts, sorted by product count (highest first)"""
+    from database.db_models import Product
+    
     brands = BrandService.list_brands(db, is_active, search, skip, limit)
-    return [brand_to_dict(b) for b in brands]
+    
+    # Add product count for each brand
+    brands_with_count = []
+    for brand in brands:
+        product_count = db.query(Product).filter(Product.brand_id == brand.id).count()
+        brand_dict = brand_to_dict(brand)
+        brand_dict['product_count'] = product_count
+        brands_with_count.append(brand_dict)
+    
+    # Sort by product count (highest first)
+    brands_with_count.sort(key=lambda x: x['product_count'], reverse=True)
+    
+    return brands_with_count
 
 
 @router.get("/brands/{brand_id}", response_model=BrandResponse)

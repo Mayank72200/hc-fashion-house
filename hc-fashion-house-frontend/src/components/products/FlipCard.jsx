@@ -61,6 +61,21 @@ export default function FlipCard({
   const isSizeSelected = selectedSize !== null;
   const canAddToCart = isColorSelected && isSizeSelected;
 
+  const handleColorSelect = useCallback((e, color) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedColor(color);
+    setSelectedSize(null);
+  }, []);
+
+  const handleSizeSelect = useCallback((e, s) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isColorSelected) {
+      setSelectedSize(s);
+    }
+  }, [isColorSelected]);
+
   const handleAddToCart = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -206,22 +221,6 @@ export default function FlipCard({
       if (externalStopped) return;
       triggerTemporaryPause();
     }, [externalStopped, triggerTemporaryPause]);
-
-    const handleColorSelect = useCallback((e, color) => {
-      e.stopPropagation();
-      setSelectedColor(color);
-      setSelectedSize(null);
-      if (isLarge && onPermanentStop) {
-        onPermanentStop();
-      }
-    }, [isLarge, onPermanentStop]);
-
-    const handleSizeSelect = useCallback((e, s) => {
-      e.stopPropagation();
-      if (isColorSelected) {
-        setSelectedSize(s);
-      }
-    }, [isColorSelected]);
     
     return (
       <motion.div
@@ -236,36 +235,23 @@ export default function FlipCard({
         onTouchStart={handleCardInteraction}
       >
         {/* Image Section */}
-        <div className="relative w-full lg:w-[55%] flex items-center justify-center bg-gradient-to-br from-neutral-50 via-white to-neutral-100 dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-900 p-4 md:p-6 lg:p-8 h-[340px] md:h-[300px] lg:h-full rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none overflow-visible">
+        <div className="relative w-full lg:w-[55%] flex items-center justify-center bg-gradient-to-br from-neutral-50 via-white to-neutral-100 dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-900 h-[340px] md:h-[300px] lg:h-full rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none overflow-hidden">
           
-          {/* Decorative gradient */}
-          <div className="absolute inset-0 opacity-30 pointer-events-none overflow-hidden rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none">
-            <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-gradient-to-bl from-neutral-200/50 to-transparent dark:from-neutral-700/20 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 left-0 w-1/3 h-1/3 bg-gradient-to-tr from-neutral-200/50 to-transparent dark:from-neutral-700/20 rounded-full blur-3xl" />
-          </div>
-
           {/* Main Product Image */}
-          <div className="relative w-full h-full flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex items-center justify-center z-10">
             <AnimatePresence mode="wait">
               <motion.img
                 key={mainImage}
-                initial={{ opacity: 0, scale: 0.9 }}
+                initial={{ opacity: 0 }}
                 animate={{ 
-                  opacity: 1, 
-                  scale: hovered ? 1.05 : 1,
-                  y: hovered ? -10 : 0,
-                  rotate: hovered ? 2 : 0
+                  opacity: 1
                 }}
-                exit={{ opacity: 0, scale: 0.9 }}
+                exit={{ opacity: 0 }}
                 transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                 src={mainImage}
                 alt={product.name}
-                className="object-contain max-w-full max-h-full w-auto h-auto pointer-events-none"
+                className="object-cover w-full h-full pointer-events-none"
                 style={{
-                  width: '100%',
-                  height: '100%',
-                  maxWidth: '420px',
-                  maxHeight: '300px',
                   filter: 'drop-shadow(0 25px 50px rgba(0,0,0,0.25))'
                 }}
               />
@@ -373,29 +359,41 @@ export default function FlipCard({
         {/* Content Section */}
         <div className="w-full lg:w-[45%] flex flex-col justify-start lg:justify-center p-5 md:p-6 lg:p-8 lg:pl-12 text-left text-neutral-900 dark:text-white overflow-y-auto flex-1">
           {/* Brand */}
-          <p className="text-[10px] md:text-[11px] text-neutral-400 uppercase tracking-[0.15em] mb-1 font-medium">
+          <p className="text-sm md:text-base lg:text-lg text-[#6B7280] dark:text-[#9CA3AF] uppercase tracking-wide mb-1 font-semibold">
             {product.brand}
           </p>
 
           {/* Product Name */}
-          <h2 className="font-product font-bold text-xl md:text-2xl lg:text-3xl text-[#36454F] dark:text-[#E8E8E8] mb-2 leading-tight">
+          <h2 className="font-product font-bold text-xl md:text-2xl lg:text-3xl text-[#1A1A1A] dark:text-[#EDEDED] mb-2 leading-tight">
             {product.name}
           </h2>
 
           {/* Price & Discount */}
           <div className="flex items-center gap-2 md:gap-3 mb-2 flex-wrap">
-            <span className="text-xl md:text-2xl lg:text-3xl font-bold text-neutral-800 dark:text-neutral-100">
+            <span className="text-xl md:text-2xl lg:text-3xl font-bold text-[#B11226] dark:text-[#EF4444]">
               ₹{product.price?.toLocaleString()}
             </span>
-            {product.originalPrice && (
-              <span className="text-sm md:text-base text-neutral-400 line-through">
-                ₹{product.originalPrice.toLocaleString()}
-              </span>
+            {product.mrp && product.mrp > product.price && (
+              <>
+                <span className="text-sm md:text-base text-[#9CA3AF] dark:text-[#6B7280] line-through">
+                  MRP ₹{product.mrp.toLocaleString()}
+                </span>
+                <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] md:text-xs font-medium rounded-full">
+                  Save {Math.round(((product.mrp - product.price) / product.mrp) * 100)}%
+                </span>
+              </>
             )}
-            {product.discount && (
-              <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] md:text-xs font-medium rounded-full">
-                Save {product.discount}%
-              </span>
+            {product.originalPrice && product.originalPrice > product.price && !product.mrp && (
+              <>
+                <span className="text-sm md:text-base text-[#9CA3AF] dark:text-[#6B7280] line-through">
+                  MRP ₹{product.originalPrice.toLocaleString()}
+                </span>
+                {product.discount && (
+                  <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] md:text-xs font-medium rounded-full">
+                    Save {product.discount}%
+                  </span>
+                )}
+              </>
             )}
           </div>
 
@@ -407,14 +405,14 @@ export default function FlipCard({
                   key={star}
                   className={`w-3.5 h-3.5 md:w-4 md:h-4 ${
                     star <= Math.floor(product.rating || 4)
-                      ? 'fill-[#F4C430] text-[#F4C430]'
-                      : 'text-neutral-200 dark:text-neutral-700'
+                      ? 'fill-[#FACC15] text-[#FACC15]'
+                      : 'text-[#E5E7EB] dark:text-[#374151]'
                   }`}
                 />
               ))}
             </div>
             <span className="text-xs md:text-sm text-neutral-500">
-              {product.rating || 4.5} · {Math.floor(Math.random() * 200) + 50} reviews
+              {product.rating || 4.5} · {product.reviews || 0} reviews
             </span>
           </div>
 
@@ -431,9 +429,11 @@ export default function FlipCard({
                 )}
               </p>
               <div className="flex flex-wrap gap-2">
-                {product.colors.map((color) => {
+                {product.colors.map((colorItem) => {
+                  const color = typeof colorItem === 'string' ? colorItem : colorItem.name;
+                  const colorHex = typeof colorItem === 'object' ? colorItem.hex : null;
                   const isSelected = selectedColor === color;
-                  const colorValue = colorMap[color] || '#888888';
+                  const colorValue = colorHex || colorMap[color] || '#888888';
                   const isGradient = colorValue.includes('gradient');
                   const isLight = isLightColor(color);
                   
@@ -485,7 +485,11 @@ export default function FlipCard({
                 )}
               </p>
               <div className={`flex flex-wrap gap-1.5 md:gap-2 transition-all duration-300 ${!isColorSelected ? 'opacity-40 pointer-events-none' : ''}`}>
-                {product.sizes.map((s) => (
+                {[...product.sizes].sort((a, b) => {
+                  const numA = parseFloat(a);
+                  const numB = parseFloat(b);
+                  return numA - numB;
+                }).map((s) => (
                   <button
                     key={s}
                     disabled={!isColorSelected}
@@ -586,11 +590,11 @@ export default function FlipCard({
         </button>
 
         {/* Product Image - CENTERED & BIGGER */}
-        <div className="absolute inset-0 flex items-center justify-center p-8">
+        <div className="absolute inset-0 overflow-hidden rounded-t-2xl">
           <motion.img
             src={product.image}
             alt={product.name}
-            className="w-full h-full object-contain transition-transform duration-700 group-hover:scale-110 group-hover:rotate-[-3deg]"
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 group-hover:rotate-[-3deg]"
             style={{ filter: 'drop-shadow(0 15px 30px rgba(0,0,0,0.15))' }}
           />
         </div>
@@ -610,78 +614,143 @@ export default function FlipCard({
       </div>
 
       {/* Content - IMPROVED LAYOUT */}
-      <div className="p-4 md:p-5">
-        {/* Free Shipping Badge */}
-        <div className="flex items-center gap-1.5 mb-2">
-          <div className="flex items-center gap-1 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/30 rounded-full">
-            <Truck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Free Shipping</span>
-          </div>
-        </div>
-
-        {/* Brand & Rating Row */}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-medium">
+      <div className="p-3">
+        {/* Brand & Rating Row with Free Shipping Badge */}
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-[#6B7280] dark:text-[#9CA3AF] font-medium">
             {product.brand}
           </span>
-          {product.rating && (
-            <div className="flex items-center gap-1 bg-[#F4C430]/10 dark:bg-[#F4C430]/20 px-2 py-0.5 rounded-full">
-              <Star className="w-3 h-3 fill-[#F4C430] text-[#F4C430]" />
-              <span className="text-[10px] font-bold text-[#C9A24D] dark:text-[#F4C430]">{product.rating}</span>
+          <div className="flex items-center gap-1.5">
+            {product.rating && (
+              <div className="flex items-center gap-1 bg-[#FACC15]/10 dark:bg-[#FACC15]/20 px-1.5 py-0.5 rounded-full">
+                <Star className="w-3 h-3 fill-[#FACC15] text-[#FACC15]" />
+                <span className="text-[10px] font-bold text-[#C9A24D] dark:text-[#FACC15]">{product.rating}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 rounded-full">
+              <Truck className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Free</span>
             </div>
-          )}
+          </div>
         </div>
 
         {/* Product Name */}
-        <h3 className="font-bold text-base md:text-lg text-neutral-900 dark:text-white mb-3 line-clamp-2 leading-tight group-hover:text-primary transition-colors min-h-[2.5rem]">
+        <h3 className="font-product font-bold text-base md:text-lg text-[#1A1A1A] dark:text-[#EDEDED] mb-2 line-clamp-2 leading-tight">
           {product.name}
         </h3>
 
-        {/* Color Swatches Preview */}
-        {product.colors && product.colors.length > 0 && (
-          <div className="flex items-center gap-1.5 mb-4">
-            {product.colors.slice(0, 4).map((color, i) => {
-              const colorValue = colorMap[color] || '#888888';
-              const isGradient = colorValue.includes('gradient');
-              const isLight = isLightColor(color);
-              return (
-                <div
-                  key={i}
-                  className={`w-5 h-5 rounded-full shadow-sm ${isLight ? 'border border-neutral-200' : ''}`}
-                  style={{ background: isGradient ? colorValue : colorValue }}
-                  title={color}
-                />
-              );
-            })}
-            {product.colors.length > 4 && (
-              <span className="text-[11px] text-neutral-400 font-medium ml-1">+{product.colors.length - 4}</span>
-            )}
-          </div>
-        )}
-
-        {/* Price Row - FIXED LAYOUT */}
-        <div className="flex items-end justify-between gap-3">
-          <div className="flex flex-col">
-            <span className="font-bold text-xl md:text-2xl text-neutral-900 dark:text-white">
+        {/* Price - Show at top */}
+        <div className="mb-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-xl md:text-2xl text-[#B11226] dark:text-[#EF4444]">
               ₹{product.price.toLocaleString()}
             </span>
-            {product.originalPrice && (
-              <span className="text-xs text-neutral-400 line-through mt-0.5">
-                ₹{product.originalPrice.toLocaleString()}
+            {product.mrp && product.mrp > product.price && (
+              <span className="text-sm text-[#9CA3AF] dark:text-[#6B7280] line-through">
+                ₹{product.mrp.toLocaleString()}
               </span>
             )}
           </div>
-          
-          {/* View Button - Properly Positioned */}
-          <Link to={`/product/${product.id}`} className="flex-shrink-0">
-            <Button 
-              size="sm" 
-              className="h-10 w-10 p-0 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-100 dark:text-neutral-900 shadow-lg hover:scale-110 transition-all"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </Button>
-          </Link>
         </div>
+
+        {/* Color Selection - First */}
+        {product.colors && product.colors.length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2 flex items-center gap-2">
+              Color
+              {selectedColor && (
+                <span className="text-neutral-500 text-[10px]">— {selectedColor}</span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {product.colors.map((colorItem, i) => {
+                const color = typeof colorItem === 'string' ? colorItem : colorItem.name;
+                const colorHex = typeof colorItem === 'object' ? colorItem.hex : null;
+                const colorValue = colorHex || colorMap[color] || '#888888';
+                const isSelected = selectedColor === color;
+                const isGradient = colorValue.includes('gradient');
+                const isLight = isLightColor(color);
+                
+                return (
+                  <button
+                    key={i}
+                    onClick={(e) => handleColorSelect(e, color)}
+                    className={`w-8 h-8 rounded-full transition-all ${
+                      isSelected 
+                        ? 'ring-2 ring-offset-2 ring-neutral-900 dark:ring-white scale-110' 
+                        : 'hover:scale-110'
+                    } ${isLight ? 'border border-neutral-200' : ''}`}
+                    style={{ background: isGradient ? colorValue : colorValue }}
+                    title={color}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Size Selection - Second */}
+        {product.sizes && product.sizes.length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2 flex items-center gap-2">
+              Size
+              {selectedSize && (
+                <span className="text-neutral-500 text-[10px]">— {selectedSize}</span>
+              )}
+              {!isColorSelected && (
+                <span className="text-amber-500 text-[10px]">Select color first</span>
+              )}
+            </p>
+            <div className={`flex flex-wrap gap-2 transition-all ${!isColorSelected ? 'opacity-40 pointer-events-none' : ''}`}>
+              {[...product.sizes].sort((a, b) => {
+                const numA = parseFloat(a);
+                const numB = parseFloat(b);
+                return numA - numB;
+              }).map((s) => (
+                <button
+                  key={s}
+                  disabled={!isColorSelected}
+                  onClick={(e) => handleSizeSelect(e, s)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg border transition-all ${
+                    selectedSize === s
+                      ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-white dark:text-neutral-900 dark:border-white'
+                      : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400'
+                  } ${!isColorSelected ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Add to Cart Button */}
+        <Button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!selectedColor || !selectedSize) {
+              toast.error(!selectedColor ? 'Please select a color' : 'Please select a size');
+              return;
+            }
+            addItem({
+              ...product,
+              selectedSize,
+              selectedColor,
+              quantity: 1
+            });
+            toast.success(`${product.name} added to cart!`);
+          }}
+          disabled={!selectedColor || !selectedSize}
+          className={`w-full h-11 font-semibold transition-all ${
+            selectedColor && selectedSize
+              ? 'bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-100 dark:text-neutral-900'
+              : 'bg-neutral-200 dark:bg-neutral-700 cursor-not-allowed opacity-50'
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4 mr-2" />
+          {!selectedColor ? 'Select Color' : !selectedSize ? 'Select Size' : 'Add to Cart'}
+        </Button>
       </div>
     </motion.div>
   );

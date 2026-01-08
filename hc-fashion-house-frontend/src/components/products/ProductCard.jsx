@@ -65,8 +65,8 @@ export default function ProductCard({ product, viewMode = 'grid', index = 0, col
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-muted-foreground font-medium">{product.brand}</p>
-            <h3 className="font-product font-bold text-lg text-[#36454F] dark:text-[#E8E8E8] truncate mt-0.5">{product.name}</h3>
+            <p className="text-[11px] text-[#6B7280] dark:text-[#9CA3AF] font-medium uppercase tracking-wide">{product.brand}</p>
+            <h3 className="font-product font-bold text-lg text-[#1A1A1A] dark:text-[#EDEDED] truncate mt-0.5">{product.name}</h3>
             
             {product.rating && (
               <div className="flex items-center gap-1 mt-2">
@@ -87,10 +87,10 @@ export default function ProductCard({ product, viewMode = 'grid', index = 0, col
             )}
             
             <div className="flex items-baseline gap-2 mt-3">
-              <span className="font-display text-xl font-bold text-segment-price">₹{displayProduct.price?.toLocaleString()}</span>
+              <span className="text-xl font-bold text-[#B11226] dark:text-[#EF4444]">₹{displayProduct.price?.toLocaleString()}</span>
               {displayProduct.mrp && (
-                <span className="text-sm text-muted-foreground line-through">
-                  ₹{displayProduct.mrp.toLocaleString()}
+                <span className="text-sm text-[#9CA3AF] dark:text-[#6B7280] line-through">
+                  MRP ₹{displayProduct.mrp.toLocaleString()}
                 </span>
               )}
               {discount > 0 && (
@@ -263,7 +263,7 @@ export default function ProductCard({ product, viewMode = 'grid', index = 0, col
           <p className="text-[10px] sm:text-[11px] text-[#6B7280] font-medium uppercase tracking-wide">{displayProduct.brand}</p>
           
           {/* Product Name - Roboto for clear readability */}
-          <h3 className="font-product text-[15px] sm:text-[16px] font-bold text-[#36454F] dark:text-[#E8E8E8] mt-0.5 line-clamp-1 leading-tight">{displayProduct.name}</h3>
+          <h3 className="font-product text-[15px] sm:text-[16px] font-bold text-[#1A1A1A] dark:text-[#EDEDED] mt-0.5 line-clamp-1 leading-tight">{displayProduct.name}</h3>
           
           {/* Price Row */}
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">

@@ -138,6 +138,11 @@ class BrandResponse(BrandBase):
         from_attributes = True
 
 
+class BrandWithProductCount(BrandResponse):
+    """Brand response with product count"""
+    product_count: int = Field(0, description="Number of products for this brand")
+
+
 # ========================
 # Category Models (linked to Platform)
 # ========================
@@ -633,6 +638,9 @@ class ProductListingItem(BaseModel):
     tags: List[str] = []
     status: ProductStatus
     in_stock: bool = True
+    available_sizes: List[str] = []  # Available sizes from variants
+    available_colors: List[dict] = []  # Available colors from catalogue
+    short_description: Optional[str] = None  # Product short description
     created_at: datetime
 
     class Config:

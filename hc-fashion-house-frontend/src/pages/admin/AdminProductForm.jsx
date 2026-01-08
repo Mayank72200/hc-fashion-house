@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Plus,
   Trash2,
@@ -1181,15 +1181,32 @@ function ProductTab({
         </h3>
 
         <div className="space-y-6">
-          {/* Description */}
+          {/* Short Description */}
           <div className="space-y-2">
-            <Label htmlFor={`description-${index}`}>Description</Label>
+            <Label htmlFor={`short-description-${index}`}>Short Description</Label>
             <Textarea
-              id={`description-${index}`}
-              value={product.description}
-              onChange={(e) => onUpdate({ ...product, description: e.target.value })}
-              placeholder="Enter product description..."
-              rows={4}
+              id={`short-description-${index}`}
+              value={product.shortDescription}
+              onChange={(e) => onUpdate({ ...product, shortDescription: e.target.value })}
+              placeholder="Enter a brief product description (max 200 characters)..."
+              rows={2}
+              className="resize-none"
+              maxLength={200}
+            />
+            <p className="text-xs text-muted-foreground">
+              {product.shortDescription.length}/200 characters
+            </p>
+          </div>
+
+          {/* Long Description */}
+          <div className="space-y-2">
+            <Label htmlFor={`long-description-${index}`}>Long Description</Label>
+            <Textarea
+              id={`long-description-${index}`}
+              value={product.longDescription}
+              onChange={(e) => onUpdate({ ...product, longDescription: e.target.value })}
+              placeholder="Enter detailed product description..."
+              rows={6}
               className="resize-none"
             />
           </div>
@@ -1424,6 +1441,7 @@ function ProductTab({
 export default function AdminProductForm() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const isEditing = Boolean(id);
 
@@ -1519,6 +1537,36 @@ export default function AdminProductForm() {
 
     fetchInitialData();
   }, [toast]);
+
+  // Pre-fill form from query parameters (when coming from Catalogues page)
+  useEffect(() => {
+    if (isEditing || isLoadingData || platforms.length === 0) return;
+    
+    const catalogueId = searchParams.get('catalogue_id');
+    const catalogueName = searchParams.get('catalogue_name');
+    const platformId = searchParams.get('platform_id');
+    const gender = searchParams.get('gender');
+    const categoryId = searchParams.get('category_id');
+    
+    if (catalogueId || catalogueName || platformId || gender || categoryId) {
+      setCatalogueData(prev => ({
+        ...prev,
+        ...(catalogueId && { articleId: parseInt(catalogueId) }),
+        ...(catalogueName && { article: decodeURIComponent(catalogueName), isNewArticle: false }),
+        ...(platformId && { platformId: parseInt(platformId) }),
+        ...(gender && { gender: gender }),
+        ...(categoryId && { categoryIds: [parseInt(categoryId)] }),
+      }));
+      
+      // Fetch the platform slug if platform_id is provided
+      if (platformId) {
+        const platform = platforms.find(p => p.id === parseInt(platformId));
+        if (platform) {
+          setCatalogueData(prev => ({ ...prev, platformSlug: platform.slug }));
+        }
+      }
+    }
+  }, [searchParams, isEditing, isLoadingData, platforms]);
 
   // Load product data when editing
   useEffect(() => {
@@ -1639,6 +1687,8 @@ export default function AdminProductForm() {
           selectedSizes,
           sizeVariants,
           description: product.long_description || product.short_description || '',
+          shortDescription: product.short_description || '',
+          longDescription: product.long_description || '',
           specifications: '', // Not stored separately currently
           tags: product.tags || [],
           images,
@@ -1731,7 +1781,8 @@ export default function AdminProductForm() {
       brandName: '',
       selectedSizes: [],
       sizeVariants: {},
-      description: '',
+      shortDescription: '',
+      longDescription: '',
       specifications: '',
       tags: [],
       images: [],
@@ -1908,8 +1959,8 @@ export default function AdminProductForm() {
           color_hex: product.colorHex || null,
           mrp: mrpValue,
           price: priceValue,
-          short_description: product.description?.substring(0, 200) || null,
-          long_description: product.description || null,
+          short_description: product.shortDescription || null,
+          long_description: product.longDescription || null,
           tags: product.tags.map(t => t.toLowerCase().replace(/\s+/g, '-')),
         };
 
@@ -2071,8 +2122,8 @@ export default function AdminProductForm() {
           color_hex: product.colorHex || null,
           mrp: mrpValue,
           price: priceValue,
-          short_description: product.description?.substring(0, 200) || null,
-          long_description: product.description || null,
+          short_description: product.shortDescription || null,
+          long_description: product.longDescription || null,
           is_featured: false,
           tags: product.tags.map(t => t.toLowerCase().replace(/\s+/g, '-')),
           status: 'draft',

@@ -97,7 +97,7 @@ export function BrandsMarquee({
                     alt={brand.name}
                     src={brand.logo}
                     className={cn(
-                      "w-12 h-12 md:w-14 md:h-14 lg:w-16 lg:h-16",
+                      "w-16 h-16 md:w-18 md:h-18 lg:w-20 lg:h-20",
                       "object-contain",
                       "pointer-events-none select-none",
                       "transition-all duration-300",

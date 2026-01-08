@@ -15,6 +15,8 @@ import {
   LogOut,
   User,
   ShoppingBag,
+  Image,
+  Tag,
 } from 'lucide-react';
 
 // Admin navigation items
@@ -35,6 +37,16 @@ const navItems = [
     ],
   },
   {
+    name: 'Catalogues',
+    href: '/admin/catalogues',
+    icon: Grid,
+  },
+  {
+    name: 'Brands',
+    href: '/admin/brands',
+    icon: Tag,
+  },
+  {
     name: 'Categories',
     href: '/admin/categories',
     icon: Folder,
@@ -43,6 +55,11 @@ const navItems = [
     name: 'Stock Management',
     href: '/admin/stock',
     icon: Archive,
+  },
+  {
+    name: 'Media Library',
+    href: '/admin/media',
+    icon: Image,
   },
   {
     name: 'Orders',

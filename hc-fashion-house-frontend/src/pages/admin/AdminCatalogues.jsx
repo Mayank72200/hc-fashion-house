@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AdminCatalogueAPI, AdminProductAPI, AdminCategoryAPI } from '../../lib/adminApi';
 import {
   Plus,
@@ -450,8 +451,34 @@ function AddProductModal({ isOpen, onClose, catalogue, categories, onSave }) {
 }
 
 // Catalogue detail view showing products (color SKUs)
-function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRefresh, onClose }) {
+function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRefresh, onClose, navigate }) {
   if (!catalogue) return null;
+
+  const handleAddColor = () => {
+    // Build query parameters from catalogue and existing products
+    const params = new URLSearchParams();
+    params.append('catalogue_id', catalogue.id);
+    params.append('catalogue_name', catalogue.name);
+    
+    // If category is available, add it
+    if (catalogue.category_id) {
+      params.append('category_id', catalogue.category_id);
+    }
+    
+    // Get platform and gender from first existing product (if available)
+    if (products.length > 0) {
+      const firstProduct = products[0];
+      if (firstProduct.platform_id) {
+        params.append('platform_id', firstProduct.platform_id);
+      }
+      if (firstProduct.gender) {
+        params.append('gender', firstProduct.gender);
+      }
+    }
+    
+    // Navigate to product form with pre-filled data
+    navigate(`/admin/products/new?${params.toString()}`);
+  };
 
   return (
     <div className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 h-full flex flex-col">
@@ -488,7 +515,7 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
             <Palette className="h-12 w-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
             <p className="text-gray-500 dark:text-gray-400 mb-4">No color SKUs yet</p>
             <button
-              onClick={onAddProduct}
+              onClick={handleAddColor}
               className="inline-flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors"
             >
               <Plus className="h-4 w-4" />
@@ -507,7 +534,7 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
                     <div
                       className="w-8 h-8 rounded-full border-2 border-gray-300 dark:border-gray-600"
                       style={{
-                        backgroundColor: product.color?.toLowerCase() || '#ccc',
+                        backgroundColor: product.hex || product.color_hex || '#ccc',
                       }}
                       title={product.color}
                     />
@@ -541,7 +568,7 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
       {products.length > 0 && (
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
           <button
-            onClick={onAddProduct}
+            onClick={handleAddColor}
             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -555,6 +582,7 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
 
 // Main AdminCatalogues component
 export default function AdminCatalogues() {
+  const navigate = useNavigate();
   const [catalogues, setCatalogues] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -563,7 +591,6 @@ export default function AdminCatalogues() {
 
   // Modal states
   const [catalogueModal, setCatalogueModal] = useState({ open: false, catalogue: null });
-  const [addProductModal, setAddProductModal] = useState({ open: false, catalogue: null });
 
   // Detail panel
   const [selectedCatalogue, setSelectedCatalogue] = useState(null);
@@ -587,7 +614,24 @@ export default function AdminCatalogues() {
         AdminCatalogueAPI.list(),
         AdminCategoryAPI.list(),
       ]);
-      setCatalogues(Array.isArray(cataloguesRes) ? cataloguesRes : []);
+      
+      // Fetch product count for each catalogue
+      const cataloguesWithCount = await Promise.all(
+        (Array.isArray(cataloguesRes) ? cataloguesRes : []).map(async (catalogue) => {
+          try {
+            const products = await AdminCatalogueAPI.getProducts(catalogue.id);
+            return {
+              ...catalogue,
+              product_count: Array.isArray(products) ? products.length : 0,
+            };
+          } catch (err) {
+            console.error(`Failed to fetch products for catalogue ${catalogue.id}:`, err);
+            return { ...catalogue, product_count: 0 };
+          }
+        })
+      );
+      
+      setCatalogues(cataloguesWithCount);
       setCategories(Array.isArray(categoriesRes) ? categoriesRes : []);
     } catch (err) {
       console.error('Failed to fetch data:', err);
@@ -640,10 +684,10 @@ export default function AdminCatalogues() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              Articles / Designs
+              Catalogues / Articles
             </h1>
             <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-              Manage article designs. Add color SKUs (products) under each design.
+              Manage article designs. View linked products (colors) and disable catalogues. Stock editing is done in Stock Management.
             </p>
           </div>
 
@@ -740,11 +784,15 @@ export default function AdminCatalogues() {
                   )}
 
                   <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
+                      <Palette className="h-4 w-4" />
+                      <span>{catalogue.product_count || 0} color{(catalogue.product_count || 0) !== 1 ? 's' : ''}</span>
+                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedCatalogue(catalogue);
-                        setAddProductModal({ open: true, catalogue });
+                        // Will trigger fetchCatalogueProducts, then use detail panel's Add Color button
                       }}
                       className="text-sm text-[#C9A24D] hover:underline flex items-center gap-1"
                     >
@@ -787,7 +835,7 @@ export default function AdminCatalogues() {
             catalogue={selectedCatalogue}
             products={catalogueProducts}
             loading={loadingProducts}
-            onAddProduct={() => setAddProductModal({ open: true, catalogue: selectedCatalogue })}
+            navigate={navigate}
             onRefresh={() => fetchCatalogueProducts(selectedCatalogue.id)}
             onClose={() => setSelectedCatalogue(null)}
           />
@@ -801,19 +849,6 @@ export default function AdminCatalogues() {
         catalogue={catalogueModal.catalogue}
         categories={categories}
         onSave={fetchData}
-      />
-
-      <AddProductModal
-        isOpen={addProductModal.open}
-        onClose={() => setAddProductModal({ open: false, catalogue: null })}
-        catalogue={addProductModal.catalogue}
-        categories={categories}
-        onSave={() => {
-          fetchData();
-          if (selectedCatalogue) {
-            fetchCatalogueProducts(selectedCatalogue.id);
-          }
-        }}
       />
     </div>
   );

@@ -1407,7 +1407,8 @@ class ProductListingService:
         # Base query - exclude deleted and non-live products for public listing
         query = db.query(Product).options(
             joinedload(Product.catalogue).joinedload(Catalogue.category).joinedload(Category.platform),
-            joinedload(Product.brand)
+            joinedload(Product.brand),
+            joinedload(Product.variants).joinedload(ProductVariant.options)
         ).filter(
             Product.deleted_at.is_(None),
             Product.status == "live"
@@ -1475,14 +1476,22 @@ class ProductListingService:
             primary_image_url = primary_image.cloudinary_url if primary_image else None
             primary_image_alt = product.name
 
-            # Check stock availability (stock is stored at option level, not variant level)
+            # Check stock availability and collect available sizes
             in_stock = False
+            available_sizes = []
             for v in product.variants:
                 if v.deleted_at is None and v.is_active:
                     variant_stock = sum(opt.stock_quantity or 0 for opt in (v.options or []))
                     if variant_stock > 0:
                         in_stock = True
-                        break
+                        # Get size from variant_name or first option
+                        size = v.variant_name
+                        if not size and v.options:
+                            size_option = next((o for o in v.options if o.option_name == 'size'), None)
+                            if size_option:
+                                size = size_option.option_value
+                        if size and size not in available_sizes:
+                            available_sizes.append(size)
 
             # Skip out-of-stock if filter applied
             if in_stock_only and not in_stock:
@@ -1495,6 +1504,25 @@ class ProductListingService:
 
             # Get product tags as list
             product_tags = product.get_tags_list() if hasattr(product, 'get_tags_list') else []
+
+            # Get all available colors for this catalogue (same design, different colors)
+            available_colors = []
+            if product.catalogue_id:
+                # Get all products in the same catalogue (same design, different colors)
+                color_variants = db.query(Product).filter(
+                    Product.catalogue_id == product.catalogue_id,
+                    Product.deleted_at.is_(None),
+                    Product.status == "live",
+                    Product.color.isnot(None)
+                ).all()
+                
+                for cv in color_variants:
+                    if cv.color and cv.color not in [c['name'] for c in available_colors]:
+                        available_colors.append({
+                            'name': cv.color,
+                            'hex': cv.color_hex,
+                            'product_id': cv.id
+                        })
 
             listing_items.append({
                 "id": product.id,
@@ -1517,6 +1545,9 @@ class ProductListingService:
                 "tags": product_tags,
                 "status": product.status,
                 "in_stock": in_stock,
+                "available_sizes": available_sizes,
+                "available_colors": available_colors,
+                "short_description": product.short_description,
                 "created_at": product.created_at
             })
 
