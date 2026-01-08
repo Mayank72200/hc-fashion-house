@@ -1,0 +1,48 @@
+# Start from Ford's official Python UBI image
+FROM fcr.ford.com/python-coe/python-ubi:3.12-latest
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
+# Set proxy environment variables
+ENV HTTP_PROXY=$HTTP_PROXY \
+    HTTPS_PROXY=$HTTPS_PROXY \
+    NO_PROXY=$NO_PROXY \
+    http_proxy=$HTTP_PROXY \
+    https_proxy=$HTTPS_PROXY \
+    no_proxy=$NO_PROXY
+
+#==============================================================================
+# Install minimal system dependencies needed for TeX Live
+#==============================================================================
+RUN yum update -y && \
+    yum install -y wget tar gzip perl fontconfig && \
+    yum clean all
+
+#==============================================================================
+# Install TeX Live (LaTeX) - The slow part
+#==============================================================================
+RUN cd /tmp && \
+    wget -O install-tl-unx.tar.gz http://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz && \
+    tar -xzf install-tl-unx.tar.gz && \
+    INSTALL_DIR=$(find . -maxdepth 1 -type d -name "install-tl-*") && \
+    cd "$INSTALL_DIR" && \
+    echo "selected_scheme scheme-full" > texlive.profile && \
+    echo "tlpdbopt_install_docfiles 0" >> texlive.profile && \
+    echo "tlpdbopt_install_srcfiles 0" >> texlive.profile && \
+    ./install-tl --profile=texlive.profile && \
+    rm -rf /tmp/install-tl*
+
+# Set Environment Paths for TeX Live only
+ENV PATH="/usr/local/texlive/2025/bin/x86_64-linux:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+#==============================================================================
+# Verification
+#==============================================================================
+RUN echo "--- Verifying TeX Live installation ---" && \
+    which pdflatex && \
+    pdflatex --version && \
+    echo "--- Base image build complete ---"

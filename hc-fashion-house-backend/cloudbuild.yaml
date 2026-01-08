@@ -1,0 +1,176 @@
+# Set a longer timeout to accommodate the initial, one-time build of the base image with TexLive.
+timeout: 10800s  # 3 hours
+
+steps:
+  - id: login
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+    - -c
+    - |
+     docker login --username=$$USERNAME --password=$$PASSWORD fcr.ford.com
+    secretEnv: [ "USERNAME", "PASSWORD" ]
+
+#  - id: 'FOSSA-SCAN'
+#    name: 'gcr.io/cloud-builders/docker'
+#    entrypoint: bash
+#    secretEnv: [ "FOSSA_API_KEY", "JFROG_FOSSA_TOKEN" ]
+#    args:
+#      - -c
+#      - |
+#        export HTTP_PROXY=http://internet.gcp.ford.com:83
+#        export HTTPS_PROXY=http://internet.gcp.ford.com:83
+#        export NO_PROXY=localhost,127.0.0.1,19.0.0.0/8,10.0.0.0/8,172.16.0.0/12,*.ford.com,.google.internal,.googleapis.com,.run.app
+#        export http_proxy=http://internet.gcp.ford.com:83
+#        export https_proxy=http://internet.gcp.ford.com:83
+#        export no_proxy=localhost,127.0.0.1,19.0.0.0/8,10.0.0.0/8,172.16.0.0/12,*.ford.com,.google.internal,.googleapis.com,.run.app
+#        apt-get update && apt-get install -y unzip
+#        curl -H "Authorization: Bearer $$JFROG_FOSSA_TOKEN" -OL https://jfrog.ford.com/artifactory/sde-jenkins-tools/fossa-cli/fossa_3.9.5_linux_amd64.zip
+#        chmod 664 fossa_3.9.5_linux_amd64.zip
+#        unzip fossa_3.9.5_linux_amd64.zip
+#        ls -lrth
+#        chmod +x fossa
+#
+#        ./fossa analyze -e https://ford.fossa.com -T FASSIST-58301 -p falcon-mf-tool --policy 'Website/Hosted Service Use' -b ${BRANCH_NAME}
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: check-base-image
+    entrypoint: 'bash'
+    args:
+     - '-c'
+     - |
+       # Try to pull the base image, suppress error output
+       if docker pull us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:base-latest >/dev/null 2>&1; then
+         echo "Base image exists, will skip build"
+         echo "true" > /workspace/skip_base_build
+       else
+         echo "Base image not found, will build"
+         echo "false" > /workspace/skip_base_build
+       fi
+    waitFor: ['login']
+
+  # Step 2: Build base image only if it doesn't exist
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-push-base-image
+    entrypoint: 'bash'
+    args:
+     - '-c'
+     - |
+       SKIP_BUILD=$$(cat /workspace/skip_base_build)
+
+       if [ "$${SKIP_BUILD}" = "true" ]; then
+         echo "Skipping base image build - image already exists"
+         exit 0
+       fi
+
+       echo "Building base image..."
+       docker build \
+         --build-arg HTTP_PROXY=http://internet.gcp.ford.com:83 \
+         --build-arg HTTPS_PROXY=http://internet.gcp.ford.com:83 \
+         --build-arg NO_PROXY=".ford.com|localhost|jfrog.ford.com|127.0.0.1|*.dynatrace.ford.com|ford.jfrog.io|.google.internal|.googleapis.com|.run.app|metadata.google.internal" \
+         -t us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:base-latest \
+         -f Dockerfile.base .
+
+       echo "Pushing base image..."
+       docker push us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:base-latest
+    waitFor: ['check-base-image']
+
+  # Step 2: Build the individual application images using the fast, pre-built base image.
+  # Assumes you have renamed your original Dockerfile to 'Dockerfile.app'.
+
+  # Build FastAPI image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-fastapi
+    secretEnv: [ "JFROG_AUTH_EMAIL", "JFROG_IDENTITY_TOKEN" ]
+    entrypoint: 'bash'
+    args:
+     - '-c'
+     - |
+       docker build \
+         --build-arg HTTP_PROXY=http://internet.gcp.ford.com:83 \
+         --build-arg HTTPS_PROXY=http://internet.gcp.ford.com:83 \
+         --build-arg NO_PROXY=".ford.com|localhost|jfrog.ford.com|127.0.0.1|*.dynatrace.ford.com|ford.jfrog.io|.google.internal|.googleapis.com|.run.app|metadata.google.internal" \
+         --build-arg JFROG_AUTH_TOKEN="$$JFROG_IDENTITY_TOKEN" \
+         --build-arg JFROG_AUTH_EMAIL="$$JFROG_AUTH_EMAIL" \
+         --build-arg JOB_TYPE=fastapi \
+         -t us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:fastapi-1.0 \
+         -f Dockerfile.app .
+    waitFor: [ 'build-push-base-image' ]
+
+
+  # Push all application image
+  - name: gcr.io/cloud-builders/docker
+    id: push-fastapi
+    args:
+     - push
+     - us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:fastapi-1.0
+    waitFor: ['build-fastapi']
+
+  # Deploy FastAPI Cloud Run Service
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy-fastapi-service
+    entrypoint: bash
+    args:
+       - '-c'
+       - |
+         gcloud run deploy plm-genai-mf-conversion \
+         --image us-central1-docker.pkg.dev/ford-bbfd8f90a37aa7c3fcd1ded7/ford-container-images/plm-genai-mf-conversion:fastapi-1.0 \
+         --platform managed \
+         --region us-central1 \
+         --port 8040 \
+         --memory 16Gi \
+         --timeout 3600 \
+         --cpu 4 \
+         --min-instances 1 \
+         --allow-unauthenticated \
+         --ingress internal \
+         --vpc-egress all-traffic \
+         --vpc-connector projects/prj-pp-gen-preprod-net-acc7/locations/us-central1/connectors/preprod-gen-central1-01 \
+         --service-account sa-developer@ford-bbfd8f90a37aa7c3fcd1ded7.iam.gserviceaccount.com \
+         --set-env-vars="IMPERSONATION_SERVICE_ACCOUNT=sa-developer@ford-bbfd8f90a37aa7c3fcd1ded7.iam.gserviceaccount.com"
+    waitFor: ['push-fastapi']
+
+
+  # Set IAM permissions
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: set-fastapi-invoker
+    entrypoint: bash
+    args:
+       - '-c'
+       - |
+         gcloud run services add-iam-policy-binding plm-genai-mf-conversion \
+         --project ford-bbfd8f90a37aa7c3fcd1ded7 \
+         --region us-central1 \
+         --member='allUsers' \
+         --role='roles/run.invoker'
+    waitFor: ['deploy-fastapi-service']
+
+
+serviceAccount: 'projects/ford-bbfd8f90a37aa7c3fcd1ded7/serviceAccounts/sa-developer@ford-bbfd8f90a37aa7c3fcd1ded7.iam.gserviceaccount.com'
+options:
+  logging: CLOUD_LOGGING_ONLY
+  workerPool: 'projects/ford-158dd864a0d0bbb6f103ff24/locations/us-central1/workerPools/workerpool-app-us-central1'
+  env:
+  - 'http_proxy=http://internet.ford.com:83'
+  - 'https_proxy=http://internet.ford.com:83'
+  - 'no_proxy=localhost,127.0.0.0/8,19.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.ford.com,.appspot.com,.cloudfunctions.net,.cloudproxy.app,.composer.cloud.google.com,.composer.googleusercontent.com,.datafusion.cloud.google.com,.datafusion.googleusercontent.com,.gcr.io,.internal,.googleadapis.com,.googleapis.com,.gstatic.com,.ltsapis.goog,.packages.cloud.google.com,.pkg.dev,.pki.goog,.run.app,.source.developers.google.com,.gcp.cloud.es.io,.smt-gce.susecloud.net'
+
+availableSecrets:
+  secretManager:
+  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/fcr-docker-username/versions/latest
+    env: "USERNAME"
+  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/fcr-docker-password/versions/latest
+    env: "PASSWORD"
+  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/jfrog-token/versions/latest
+    env: "JFROG_IDENTITY_TOKEN"
+  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/jfrog-email/versions/latest
+    env: "JFROG_AUTH_EMAIL"
+#  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/fossa-api-token/versions/latest
+#    env: "FOSSA_API_KEY"
+#  - versionName: projects/ford-bbfd8f90a37aa7c3fcd1ded7/secrets/jfrog-token-fossa/versions/latest
+#    env: "JFROG_FOSSA_TOKEN"
+
+gitConfig:
+  http:
+    proxySecretVersionName: 'projects/851639000331/secrets/proxy-secret/versions/latest'
+

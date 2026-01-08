@@ -1,0 +1,1022 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* HC Fashion House Design System
+   Based on the E-Commerce Color Theme Document
+   All colors in HSL format
+*/
+
+@layer base {
+  :root {
+    /* Global Neutrals - Light Mode (from document) */
+    --background: 220 14% 97%; /* #F8F9FB */
+    --foreground: 0 0% 10%; /* #1A1A1A */
+
+    --card: 0 0% 100%; /* #FFFFFF */
+    --card-foreground: 0 0% 10%; /* #1A1A1A */
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 0 0% 10%; /* Text primary */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 13% 34%; /* #4B5563 */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 9% 57%; /* #8B8F97 */
+    --muted-foreground: 220 9% 57%;
+
+    --accent: 201 76% 21%; /* Deep Navy - Men default accent #0B3C5D */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 90%; /* #E2E4E8 */
+    --input: 220 13% 90%;
+    --ring: 201 76% 21%;
+
+    --radius: 0.5rem;
+
+    /* Gold Accent (premium feel) */
+    --gold: 45 93% 47%;
+    --gold-light: 45 93% 60%;
+    --gold-dark: 45 93% 35%;
+
+    /* Navy Blue (for animated borders) */
+    --navy-blue: 201 76% 21%;
+
+    /* Segment Colors - Men Light Mode */
+    --segment-primary: 201 76% 21%; /* Deep Navy #0B3C5D */
+    --segment-secondary: 209 13% 43%; /* Steel Grey #5F6C7B */
+    --segment-price: 152 58% 30%; /* Forest Green #1F7A4D */
+    --segment-hover: 201 89% 14%; /* Midnight Blue #062A40 */
+    --segment-card: 0 0% 100%;
+    --segment-panel: 0 0% 100%;
+
+    /* Success/Info */
+    --success: 152 58% 30%; /* Forest Green */
+    --success-foreground: 0 0% 100%;
+    --info: 201 76% 21%;
+    --info-foreground: 0 0% 100%;
+
+    /* Product Image Background */
+    --image-bg: 0 0% 95%; /* #F3F3F3 */
+    --image-bg-alt: 0 0% 98%; /* #FAFAFA */
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 10%;
+    --sidebar-primary: 201 76% 21%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 220 13% 90%;
+    --sidebar-ring: 201 76% 21%;
+  }
+
+  .dark {
+    /* Global Neutrals - Dark Mode (from document) */
+    --background: 225 14% 7%; /* #0F1115 */
+    --foreground: 0 0% 93%; /* #EDEDED */
+
+    --card: 240 4% 11%; /* #1A1A1E */
+    --card-foreground: 0 0% 93%;
+
+    --popover: 240 4% 11%;
+    --popover-foreground: 0 0% 93%;
+
+    --primary: 0 0% 93%;
+    --primary-foreground: 225 14% 7%;
+
+    --secondary: 213 10% 73%; /* #B5B9C0 */
+    --secondary-foreground: 225 14% 7%;
+
+    --muted: 220 9% 57%;
+    --muted-foreground: 220 9% 57%;
+
+    --accent: 212 100% 65%; /* Electric Blue #4DA3FF */
+    --accent-foreground: 225 14% 7%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 14% 17%; /* #242833 */
+    --input: 224 14% 17%;
+    --ring: 212 100% 65%;
+
+    /* Gold Accent */
+    --gold: 45 93% 55%;
+    --gold-light: 45 93% 70%;
+
+    /* Navy Blue (for animated borders) */
+    --navy-blue: 212 100% 65%;
+
+    /* Segment Colors - Men Dark Mode */
+    --segment-primary: 212 100% 65%; /* Electric Blue #4DA3FF */
+    --segment-secondary: 213 14% 65%; /* Cool Grey #9AA4B2 */
+    --segment-price: 155 65% 55%; /* Mint Green #3DDC97 */
+    --segment-hover: 212 100% 75%;
+    --segment-card: 212 24% 11%; /* Dark Slate #151A21 */
+    --segment-panel: 212 24% 11%;
+
+    /* Success/Info */
+    --success: 155 65% 55%;
+    --success-foreground: 0 0% 10%;
+    --info: 212 100% 65%;
+    --info-foreground: 0 0% 10%;
+
+    /* Sidebar */
+    --sidebar-background: 240 4% 11%;
+    --sidebar-foreground: 0 0% 93%;
+    --sidebar-primary: 212 100% 65%;
+    --sidebar-primary-foreground: 225 14% 7%;
+    --sidebar-accent: 224 14% 17%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 224 14% 17%;
+    --sidebar-ring: 212 100% 65%;
+  }
+
+  /* ========== MEN THEME ========== */
+  .theme-men {
+    --accent: 201 76% 21%; /* Deep Navy #0B3C5D */
+    --accent-foreground: 0 0% 100%;
+    --segment-primary: 201 76% 21%;
+    --segment-secondary: 209 13% 43%; /* Steel Grey #5F6C7B */
+    --segment-price: 152 58% 30%; /* Forest Green #1F7A4D */
+    --segment-hover: 201 89% 14%; /* Midnight Blue #062A40 */
+    --segment-panel: 40 20% 97%; /* Off-white #FAF9F7 */
+    --ring: 201 76% 21%;
+  }
+
+  .theme-men.dark, .dark .theme-men {
+    --accent: 212 100% 65%; /* Electric Blue #4DA3FF */
+    --accent-foreground: 225 14% 7%;
+    --segment-primary: 212 100% 65%;
+    --segment-secondary: 213 14% 65%; /* Cool Grey #9AA4B2 */
+    --segment-price: 155 65% 55%; /* Mint Green #3DDC97 */
+    --segment-hover: 212 100% 75%;
+    --segment-card: 220 26% 7%; /* Dark bg #111827 */
+    --segment-panel: 225 14% 7%; /* Dark page bg #0F1115 */
+    --card: 220 26% 7%;
+    --ring: 212 100% 65%;
+  }
+
+  /* ========== WOMEN THEME ========== */
+  .theme-women {
+    --accent: 350 52% 81%; /* Dusty Rose #E8B4B8 */
+    --accent-foreground: 0 0% 11%; /* #1C1C1C */
+    --segment-primary: 350 52% 81%;
+    --segment-secondary: 350 45% 75%; /* Softer rose */
+    --segment-price: 6 100% 69%; /* Warm Coral #FF6F61 */
+    --segment-hover: 350 52% 75%;
+    --segment-panel: 30 14% 96%; /* Warm off-white #F6F4F3 */
+    --segment-card: 350 100% 99%; /* Rose-warm white #FFFBFC */
+    --card: 350 100% 99%;
+    --ring: 350 52% 81%;
+  }
+
+  .theme-women.dark, .dark .theme-women {
+    --accent: 350 52% 81%; /* Dusty Rose #E8B4B8 */
+    --accent-foreground: 0 0% 98%;
+    --segment-primary: 350 52% 81%;
+    --segment-secondary: 350 45% 75%;
+    --segment-price: 20 100% 74%; /* Peach #FF9F7A */
+    --segment-hover: 350 55% 85%;
+    --segment-card: 220 18% 11%; /* Warm dark #181C24 */
+    --segment-panel: 240 10% 8%; /* Grid bg #121217 */
+    --card: 220 18% 11%;
+    --ring: 350 52% 81%;
+  }
+
+  /* ========== KIDS THEME ========== */
+  .theme-kids {
+    --accent: 38 92% 50%; /* Orange #F59E0B */
+    --accent-foreground: 0 0% 100%;
+    --segment-primary: 38 92% 50%;
+    --segment-secondary: 47 100% 53%; /* Yellow #FACC15 */
+    --segment-price: 145 70% 51%; /* Mint Green #2ED573 */
+    --segment-hover: 38 92% 45%;
+    --segment-panel: 25 50% 97%; /* Warm Cream #FBF3EE */
+    --segment-card: 0 0% 100%; /* Pure White */
+    --card: 0 0% 100%;
+    --ring: 38 92% 50%;
+  }
+
+  .theme-kids.dark, .dark .theme-kids {
+    --accent: 38 92% 50%; /* Orange #F59E0B */
+    --accent-foreground: 30 50% 8%;
+    --segment-primary: 38 92% 50%;
+    --segment-secondary: 47 100% 53%; /* Yellow #FACC15 */
+    --segment-price: 160 79% 63%; /* Aqua Green #55EFC4 */
+    --segment-hover: 38 92% 60%;
+    --segment-panel: 20 40% 9%; /* Cocoa Dark #1E140E */
+    --segment-card: 20 40% 12%; /* Warm Brown Card #2A1B13 */
+    --card: 20 40% 12%;
+    --ring: 38 92% 50%;
+  }
+
+  /* ========== ALL PRODUCTS - BRAND NEUTRAL THEME ========== */
+  .theme-all {
+    --background: 0 0% 100%; /* Pure White */
+    --card: 0 0% 100%;
+    --accent: 43 74% 54%; /* Gold #C9A24D */
+    --accent-foreground: 0 0% 100%;
+    --segment-primary: 43 74% 54%;
+    --segment-secondary: 0 0% 45%;
+    --segment-price: 145 70% 51%;
+    --segment-hover: 43 74% 45%;
+    --segment-panel: 40 20% 98%; /* Off-white #FAF9F7 */
+    --segment-card: 0 0% 100%;
+    --ring: 43 74% 54%;
+  }
+
+  .theme-all.dark, .dark .theme-all {
+    --background: 222 47% 11%; /* Navy #0F172A */
+    --card: 220 26% 7%; /* Dark card #0B0F19 */
+    --accent: 43 74% 54%; /* Gold #C9A24D */
+    --accent-foreground: 222 47% 11%;
+    --segment-primary: 43 74% 54%;
+    --segment-secondary: 0 0% 55%;
+    --segment-price: 160 79% 63%;
+    --segment-hover: 43 74% 65%;
+    --segment-panel: 220 26% 7%;
+    --segment-card: 222 25% 10%;
+    --ring: 43 74% 54%;
+  }
+
+  /* ========== HOMEPAGE - WHITE THEME ========== */
+  .theme-home {
+    --background: 220 14% 97%; /* #F8F9FB - matches palette */
+    --card: 0 0% 100%;
+    --accent: 45 93% 47%; /* Gold as accent */
+    --accent-foreground: 0 0% 10%;
+    --navy-blue: 210 54% 24%; /* #1e3a5f - Navy Blue for accents */
+  }
+
+  .theme-home.dark, .dark .theme-home {
+    --background: 225 14% 7%;
+    --card: 240 4% 11%;
+    --accent: 45 93% 55%;
+    --accent-foreground: 0 0% 10%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', serif;
+  }
+
+  /* Admin Panel Typography - Uses Outfit for clean modern look */
+  .admin-layout {
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  }
+
+  .admin-layout h1,
+  .admin-layout h2,
+  .admin-layout h3,
+  .admin-layout h4,
+  .admin-layout h5,
+  .admin-layout h6 {
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+  }
+}
+
+@layer components {
+  /* Logo HC - stable yellowish gold with fallback */
+  .logo-hc {
+    color: #C9952C; /* Fallback: solid yellowish gold */
+    text-shadow: 0 1px 2px rgba(201, 149, 44, 0.2);
+  }
+
+  @supports (-webkit-background-clip: text) or (background-clip: text) {
+    .logo-hc {
+      background: linear-gradient(135deg, #C9952C 0%, #DFAF40 50%, #C49028 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: none;
+      filter: drop-shadow(0 1px 1px rgba(201, 149, 44, 0.15));
+    }
+  }
+
+  /* Premium button styles */
+  .btn-premium {
+    @apply relative overflow-hidden bg-accent text-accent-foreground px-8 py-3 font-medium;
+    @apply transition-all duration-300 ease-out;
+    @apply hover:shadow-lg;
+  }
+
+  .btn-premium::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent;
+    @apply -translate-x-full transition-transform duration-500;
+  }
+
+  .btn-premium:hover::before {
+    @apply translate-x-full;
+  }
+
+  /* Gold accent button */
+  .btn-gold {
+    @apply bg-[hsl(var(--gold))] text-foreground font-semibold px-8 py-3;
+    @apply transition-all duration-300;
+    @apply hover:bg-[hsl(var(--gold-light))] hover:shadow-lg;
+  }
+
+  /* Card hover effect */
+  .card-hover {
+    @apply transition-all duration-300 ease-out;
+    @apply hover:-translate-y-2 hover:shadow-xl;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-background/80 backdrop-blur-md border border-border/50;
+  }
+
+  /* Shimmer loading effect */
+  .shimmer {
+    @apply relative overflow-hidden;
+    background: linear-gradient(90deg, 
+      hsl(var(--card)) 0%, 
+      hsl(var(--border)) 50%, 
+      hsl(var(--card)) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Brand marquee */
+  .marquee, .marquee-reverse {
+    display: inline-flex;
+    white-space: nowrap;
+    min-width: 200%;
+    animation: marquee 16s linear infinite;
+  }
+
+  .marquee-reverse {
+    animation-direction: reverse;
+  }
+
+  @media (max-width: 768px) {
+    .marquee, .marquee-reverse {
+      animation-duration: 10s;
+    }
+  }
+
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  /* Underline animation for links */
+  .link-underline {
+    @apply relative;
+  }
+
+  .link-underline::after {
+    content: '';
+    @apply absolute bottom-0 left-0 w-full h-0.5 bg-accent;
+    @apply scale-x-0 origin-right transition-transform duration-300;
+  }
+
+  .link-underline:hover::after {
+    @apply scale-x-100 origin-left;
+  }
+
+  /* Navbar Accent Line - Segment-specific colors */
+  .navbar-accent-line {
+    background-color: transparent;
+  }
+
+  .theme-men .navbar-accent-line {
+    background-color: #0F172A;
+  }
+
+  .dark.theme-men .navbar-accent-line,
+  .dark .theme-men .navbar-accent-line {
+    background-color: rgba(15, 23, 42, 0.7);
+  }
+
+  .theme-women .navbar-accent-line {
+    background-color: #E8B4B8;
+  }
+
+  .dark.theme-women .navbar-accent-line,
+  .dark .theme-women .navbar-accent-line {
+    background-color: rgba(232, 180, 184, 0.7);
+  }
+
+  .theme-kids .navbar-accent-line {
+    background-color: #F59E0B;
+  }
+
+  .dark.theme-kids .navbar-accent-line,
+  .dark .theme-kids .navbar-accent-line {
+    background-color: rgba(245, 158, 11, 0.75);
+  }
+
+  .theme-all .navbar-accent-line {
+    background-color: #C9A24D;
+  }
+
+  .dark.theme-all .navbar-accent-line,
+  .dark .theme-all .navbar-accent-line {
+    background-color: rgba(201, 162, 77, 0.75);
+  }
+
+  /* Product Image Container - always light neutral background */
+  .product-image-container {
+    @apply relative overflow-hidden;
+    background-color: #F3F3F3;
+  }
+
+  /* Dark mode image adjustments per document */
+  .dark .product-image-container img {
+    filter: brightness(1.04) contrast(1.04) saturate(1.02);
+  }
+
+  /* Segment Price Color */
+  .price-accent {
+    color: hsl(var(--segment-price));
+  }
+
+  /* Product Card Shadow */
+  .product-card-shadow {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+
+  .dark .product-card-shadow {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+  }
+
+  /* Segment Panel Background */
+  .segment-panel {
+    background-color: hsl(var(--segment-panel));
+  }
+
+  .dark .segment-panel {
+    background-color: hsl(var(--segment-panel));
+  }
+
+  /* Dark mode: Ensure cards are properly styled */
+  .dark .bg-card\/50,
+  .dark .bg-card\/60,
+  .dark .bg-card\/80 {
+    background-color: hsl(var(--card) / 0.7);
+  }
+
+  /* Splash Screen Styles */
+  .splash-screen {
+    @apply fixed inset-0 z-[9999] flex items-center justify-center;
+    background-color: hsl(var(--background));
+  }
+
+  .splash-logo {
+    animation: logo-reveal 1s ease-out forwards;
+  }
+
+  .splash-text {
+    animation: logo-reveal 1s ease-out 0.3s forwards;
+    opacity: 0;
+  }
+
+  .splash-exit {
+    animation: splash-exit 0.5s ease-out forwards;
+  }
+
+  @keyframes logo-reveal {
+    0% {
+      opacity: 0;
+      transform: scale(0.8) translateY(20px);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.02) translateY(-5px);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes logo-shine {
+    0% {
+      background-position: -200% center;
+    }
+    100% {
+      background-position: 200% center;
+    }
+  }
+
+  @keyframes splash-exit {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+
+  .logo-shine {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--gold)) 0%,
+      hsl(var(--gold-light)) 25%,
+      hsl(var(--gold)) 50%,
+      hsl(var(--gold-light)) 75%,
+      hsl(var(--gold)) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: logo-shine 2s ease-in-out infinite;
+  }
+
+  /* Glowing Gold Text Effect */
+  .text-glow-gold {
+    color: hsl(var(--gold));
+    text-shadow: 
+      0 0 10px hsl(var(--gold) / 0.6),
+      0 0 20px hsl(var(--gold) / 0.4),
+      0 0 30px hsl(var(--gold) / 0.3),
+      0 0 40px hsl(var(--gold) / 0.2);
+    animation: glow-pulse 2s ease-in-out infinite alternate;
+  }
+
+  @keyframes glow-pulse {
+    0% {
+      text-shadow: 
+        0 0 10px hsl(var(--gold) / 0.6),
+        0 0 20px hsl(var(--gold) / 0.4),
+        0 0 30px hsl(var(--gold) / 0.3);
+    }
+    100% {
+      text-shadow: 
+        0 0 15px hsl(var(--gold) / 0.8),
+        0 0 30px hsl(var(--gold) / 0.6),
+        0 0 45px hsl(var(--gold) / 0.4),
+        0 0 60px hsl(var(--gold) / 0.2);
+    }
+  }
+
+  /* Brand Display Font */
+  .font-display {
+    font-family: 'DM Serif Display', 'Playfair Display', serif;
+  }
+
+  /* Top Marquee Bar */
+  .top-marquee-bar {
+    @apply overflow-hidden whitespace-nowrap;
+    background: linear-gradient(90deg, hsl(0 84% 50%) 0%, hsl(0 84% 45%) 100%);
+  }
+
+  .marquee-content {
+    display: inline-flex;
+    animation: marquee-scroll 25s linear infinite;
+  }
+
+  @keyframes marquee-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+}
+
+/* Animated rotating border card */
+.animated-border-card {
+  position: relative;
+  display: flex;
+  place-content: center;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: hsl(var(--card));
+  transition: transform 0.2s ease, box-shadow 0.3s ease;
+}
+
+.animated-border-card:hover {
+  transform: scale(0.98);
+  box-shadow: 0px 0px 30px 1px rgba(0, 183, 255, 0.30);
+}
+
+/* Rotating strip (Uiverse-style) — sized to fully cover larger cards so it won’t “break” at corners */
+.animated-border-card::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: clamp(110px, 34%, 180px);
+  height: 420%;
+  background-image: linear-gradient(180deg, hsl(197 100% 50%), hsl(300 100% 59%));
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: rotBGimg 3s linear infinite;
+  will-change: transform;
+  z-index: 0;
+}
+
+.animated-border-card::after {
+  content: '';
+  position: absolute;
+  background: hsl(var(--card));
+  inset: 3px;
+  border-radius: calc(0.75rem - 3px);
+  z-index: 1;
+}
+
+.animated-border-card > * {
+  position: relative;
+  z-index: 2;
+}
+
+@keyframes rotBGimg {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-border-card::before {
+    animation: none;
+  }
+}
+
+/* Mobile optimization for animated border cards - two-line effect */
+@media (max-width: 768px) {
+  .animated-border-card {
+    border-radius: 0.5rem;
+  }
+  
+  .animated-border-card::before {
+    width: 30%;
+    height: 450%;
+    background-image: linear-gradient(180deg, hsl(197 100% 50%), hsl(300 100% 59%));
+  }
+  
+  .animated-border-card::after {
+    inset: 1.5px;
+    border-radius: calc(0.5rem - 1.5px);
+  }
+}
+
+@layer utilities {
+  /* Segment gradients */
+  .gradient-men {
+    /* Muted slate blue */
+    background: linear-gradient(135deg, hsl(215 25% 45%) 0%, hsl(215 30% 55%) 100%);
+  }
+
+  .gradient-women {
+    /* Soft dusty rose */
+    background: linear-gradient(135deg, hsl(350 35% 60%) 0%, hsl(350 40% 70%) 100%);
+  }
+
+  .gradient-kids {
+    /* Very light sky blue */
+    background: linear-gradient(135deg, hsl(200 60% 55%) 0%, hsl(195 70% 65%) 100%);
+  }
+
+  .gradient-gold {
+    background: linear-gradient(135deg, hsl(var(--gold)) 0%, hsl(var(--gold-light)) 100%);
+  }
+
+  /* Text gradients */
+  .text-gradient-gold {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--gold)) 0%, hsl(var(--gold-light)) 50%, hsl(var(--gold)) 100%);
+  }
+
+  /* Segment accent colors */
+  .text-segment-primary {
+    color: hsl(var(--segment-primary));
+  }
+
+  .text-segment-secondary {
+    color: hsl(var(--segment-secondary));
+  }
+
+  .text-segment-price {
+    color: hsl(var(--segment-price));
+  }
+
+  .bg-segment-primary {
+    background-color: hsl(var(--segment-primary));
+  }
+
+  .bg-segment-card {
+    background-color: hsl(var(--segment-card));
+  }
+
+  .bg-segment-panel {
+    background-color: hsl(var(--segment-panel));
+  }
+
+  /* Product image backgrounds */
+  .bg-image {
+    background-color: #F3F3F3;
+  }
+
+  .bg-image-alt {
+    background-color: #FAFAFA;
+  }
+
+  /* Product card image container - soft gradient background */
+  .product-image-bg {
+    background: linear-gradient(180deg, #F8F9FA 0%, #E9ECEF 100%);
+  }
+
+  .dark .product-image-bg {
+    background: linear-gradient(180deg, #1F2937 0%, #111827 100%);
+  }
+
+  /* Segment-specific image backgrounds (optional tints) */
+  .theme-men .product-image-bg {
+    background: linear-gradient(180deg, #F5F8FA 0%, #DDEAF3 100%);
+  }
+
+  .theme-women .product-image-bg {
+    background: linear-gradient(180deg, #FDF8F9 0%, rgba(241,213,219,0.08) 100%);
+  }
+
+  .theme-kids .product-image-bg {
+    background: linear-gradient(180deg, #F7DCCF 0%, #F0D0C0 100%);
+  }
+
+  .dark.theme-men .product-image-bg,
+  .dark .theme-men .product-image-bg {
+    background: linear-gradient(180deg, #1A2635 0%, #0F1A24 100%);
+  }
+
+  .dark.theme-women .product-image-bg,
+  .dark .theme-women .product-image-bg {
+    background: linear-gradient(180deg, #1E1518 0%, #181214 100%);
+  }
+
+  .dark.theme-kids .product-image-bg,
+  .dark .theme-kids .product-image-bg {
+    background: linear-gradient(180deg, #3A2418 0%, #2A1911 100%);
+  }
+
+  /* Parallax helper */
+  .parallax {
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+
+  /* Floating animation */
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+  }
+
+  /* Staggered fade in for children */
+  .stagger-fade-in > * {
+    opacity: 0;
+    animation: fade-in-up 0.6s ease-out forwards;
+  }
+
+  .stagger-fade-in > *:nth-child(1) { animation-delay: 0.1s; }
+  .stagger-fade-in > *:nth-child(2) { animation-delay: 0.2s; }
+  .stagger-fade-in > *:nth-child(3) { animation-delay: 0.3s; }
+  .stagger-fade-in > *:nth-child(4) { animation-delay: 0.4s; }
+  .stagger-fade-in > *:nth-child(5) { animation-delay: 0.5s; }
+  .stagger-fade-in > *:nth-child(6) { animation-delay: 0.6s; }
+  .stagger-fade-in > *:nth-child(7) { animation-delay: 0.7s; }
+  .stagger-fade-in > *:nth-child(8) { animation-delay: 0.8s; }
+
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Glow effect for accent elements */
+  .glow-accent {
+    box-shadow: 0 0 30px hsl(var(--accent) / 0.3);
+  }
+
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-card/60 backdrop-blur-md border border-border/30;
+  }
+
+  /* Smooth image zoom on hover */
+  .hover-zoom {
+    @apply overflow-hidden;
+  }
+
+  .hover-zoom img {
+    @apply transition-transform duration-700 ease-out;
+  }
+
+  .hover-zoom:hover img {
+    @apply scale-110;
+  }
+
+  /* ========== 3D FLIP CARD STYLES ========== */
+  .flip-card {
+    perspective: 1000px;
+    width: 100%;
+  }
+
+  .flip-card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+  }
+
+  .flip-card-inner.flipped {
+    transform: rotateY(180deg);
+  }
+
+  .flip-card-front,
+  .flip-card-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
+  .flip-card-front {
+    z-index: 2;
+  }
+
+  .flip-card-back {
+    transform: rotateY(180deg);
+    z-index: 1;
+  }
+
+  /* Tab active indicator animation */
+  .tab-indicator {
+    @apply absolute bottom-0 left-0 h-0.5 bg-accent transition-all duration-300;
+  }
+
+  /* Staggered grid animation */
+  .stagger-grid > * {
+    animation: stagger-fade-up 0.5s ease-out forwards;
+    opacity: 0;
+  }
+
+  .stagger-grid > *:nth-child(1) { animation-delay: 0.1s; }
+  .stagger-grid > *:nth-child(2) { animation-delay: 0.2s; }
+  .stagger-grid > *:nth-child(3) { animation-delay: 0.3s; }
+  .stagger-grid > *:nth-child(4) { animation-delay: 0.4s; }
+
+  @keyframes stagger-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Featured product glow effect */
+  .featured-glow {
+    @apply relative;
+  }
+
+  .featured-glow::before {
+    content: '';
+    @apply absolute -inset-1 rounded-2xl opacity-0 transition-opacity duration-300;
+    background: linear-gradient(135deg, hsl(var(--accent) / 0.3), hsl(var(--gold) / 0.3));
+    filter: blur(20px);
+    z-index: -1;
+  }
+
+  .featured-glow:hover::before {
+    @apply opacity-100;
+  }
+}
+
+/* Custom Scrollbar Styling - Desktop Only */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #C9A24D 0%, #B8923D 50%, #D4AF5C 100%);
+    border-radius: 10px;
+    border: 2px solid #f1f1f1;
+    transition: all 0.3s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #D4AF5C 0%, #C9A24D 50%, #E5C06E 100%);
+    box-shadow: 0 0 10px rgba(201, 162, 77, 0.5);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: #f1f1f1;
+  }
+
+  /* Dark Mode Scrollbar */
+  .dark ::-webkit-scrollbar-track,
+  .dark::-webkit-scrollbar-track {
+    background: #1a1a1e;
+  }
+
+  .dark ::-webkit-scrollbar-thumb,
+  .dark::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #C9A24D 0%, #A88A3D 50%, #D4AF5C 100%);
+    border: 2px solid #1a1a1e;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover,
+  .dark::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #D4AF5C 0%, #C9A24D 50%, #E5C06E 100%);
+    box-shadow: 0 0 12px rgba(201, 162, 77, 0.6);
+  }
+
+  .dark ::-webkit-scrollbar-corner,
+  .dark::-webkit-scrollbar-corner {
+    background: #1a1a1e;
+  }
+
+  /* Firefox Scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #C9A24D #f1f1f1;
+  }
+
+  .dark * {
+    scrollbar-color: #C9A24D #1a1a1e;
+  }
+
+  /* Animated scrollbar glow on scroll */
+  @keyframes scrollbar-glow {
+    0%, 100% {
+      box-shadow: 0 0 5px rgba(201, 162, 77, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 15px rgba(201, 162, 77, 0.6);
+    }
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    animation: scrollbar-glow 1s ease-in-out infinite;
+  }
+}
+
+/* Hide scrollbar on mobile */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  
+  * {
+    scrollbar-width: none;
+  }
+}

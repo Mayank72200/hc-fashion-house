@@ -1,0 +1,35 @@
+# E-Commerce Backend Requirements
+# FastAPI with Supabase Auth
+
+# Web Framework & Server
+fastapi
+uvicorn
+python-multipart
+
+# Database
+sqlalchemy
+
+# Media Storage
+cloudinary
+
+# Authentication (Supabase)
+supabase
+python-jose[cryptography]
+
+# Configuration & Data Validation
+python-dotenv
+pydantic
+pydantic-settings
+
+# Networking & Async
+aiohttp
+httpx
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+
+# Development Tools
+psutil
+
