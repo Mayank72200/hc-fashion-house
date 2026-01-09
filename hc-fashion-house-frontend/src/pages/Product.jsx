@@ -11,6 +11,7 @@ import { useWishlist } from '@/contexts/WishlistContext';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProductDetail, useProducts } from '@/hooks/useProducts';
+import { convertSize } from '@/utils/sizeConversion';
 
 // Category accent colors
 const categoryAccents = {
@@ -492,13 +493,13 @@ export default function Product() {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-medium uppercase tracking-wide text-[#6B7280] dark:text-[#9CA3AF] font-['Inter',sans-serif]">Select Size</h3>
                 <div className="flex gap-1 text-xs font-['Inter',sans-serif]">
-                  {['ind', 'eu'].map((sys) => (
+                  {['IND', 'UK', 'EU'].map((sys) => (
                     <button
                       key={sys}
-                      onClick={() => setSizeSystem(sys)}
+                      onClick={() => setSizeSystem(sys.toLowerCase())}
                       className={cn(
                         "px-2.5 py-1 rounded transition-colors uppercase font-medium",
-                        sizeSystem === sys 
+                        sizeSystem === sys.toLowerCase() 
                           ? "bg-[#1C1C1C] dark:bg-white text-white dark:text-[#0F172A]" 
                           : "text-[#6B7280] dark:text-[#9CA3AF] hover:bg-[#F3F4F6] dark:hover:bg-[#1F2937]"
                       )}
@@ -509,12 +510,30 @@ export default function Product() {
                 </div>
               </div>
               <div className="grid grid-cols-5 sm:grid-cols-6 gap-1.5 lg:gap-2">
-                {(product.sizes || []).map((size) => {
-                  const isSelected = selectedSize?.uk === size.uk;
-                  const displaySize = sizeSystem === 'ind' ? size.uk : size.eu;
+                {(product.sizes || []).map((size, index) => {
+                  // Get the IND size (which is what's stored in size.ind)
+                  const indSize = size.ind || size.uk || size;
+                  const originalSystem = product.sizeChartType || 'IND';
+                  const originalSize = size.originalSize || indSize;
+                  const gender = product.gender || 'men';
+                  
+                  // Convert to selected size system
+                  let displaySize;
+                  if (sizeSystem === 'ind') {
+                    displaySize = indSize;
+                  } else {
+                    displaySize = convertSize(originalSize, originalSystem, sizeSystem.toUpperCase(), gender) || indSize;
+                  }
+                  
+                  const isSelected = selectedSize && (
+                    selectedSize === indSize || 
+                    selectedSize === displaySize ||
+                    selectedSize?.ind === indSize
+                  );
+                  
                   return (
                     <motion.button
-                      key={size.uk}
+                      key={`${indSize}-${index}`}
                       onClick={() => size.inStock && setSelectedSize(size)}
                       disabled={!size.inStock}
                       whileTap={size.inStock ? { scale: 0.92 } : {}}

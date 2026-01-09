@@ -22,6 +22,7 @@ import { useWishlist } from '@/contexts/WishlistContext';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
+import { BrandAPI } from '@/lib/api';
 
 const navLinks = [
   { label: 'Home', href: '/' },
@@ -42,15 +43,8 @@ const navLinks = [
   },
   { 
     label: 'Brands', 
-    href: '/brands',
-    children: [
-      { label: 'Nike', href: '/brands/nike' },
-      { label: 'Adidas', href: '/brands/adidas' },
-      { label: 'Puma', href: '/brands/puma' },
-      { label: 'Reebok', href: '/brands/reebok' },
-      { label: 'Campus', href: '/brands/campus' },
-      { label: 'JQR', href: '/brands/jqr' },
-    ],
+    href: '#',  // No direct href, will show dropdown
+    hasDynamicChildren: true,  // Flag to fetch brands from API
   },
   { label: 'New Arrivals', href: '/new-arrivals' },
   { label: 'Ongoing Offers', href: '/sale', highlight: true },
@@ -58,6 +52,7 @@ const navLinks = [
 
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
+  const [brands, setBrands] = useState([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -69,6 +64,19 @@ export default function Header() {
   const { itemCount: wishlistCount } = useWishlist();
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Fetch brands from API
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        const brandsData = await BrandAPI.getBrands({ limit: 100 });
+        setBrands(brandsData || []);
+      } catch (error) {
+        console.error('Error fetching brands:', error);
+      }
+    };
+    fetchBrands();
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -377,58 +385,81 @@ export default function Header() {
         )}>
           <div className="w-full px-4 sm:px-6 lg:px-10 xl:px-12 2xl:px-16">
             <div className="flex items-center justify-center gap-8 py-3">
-              {navLinks.map((link) => (
-                <div
-                  key={link.label}
-                  className="relative"
-                  onMouseEnter={() => link.children && setActiveDropdown(link.label)}
-                  onMouseLeave={() => setActiveDropdown(null)}
-                >
-                  <Link
-                    to={link.href}
-                    onClick={() => handleSegmentClick(link.segment)}
-                    className={cn(
-                      'flex items-center gap-1 font-medium transition-colors py-2 text-sm uppercase tracking-wide',
-                      link.highlight 
-                        ? 'text-destructive font-semibold flex items-center gap-2' 
-                        : isActiveLink(link.href)
-                          ? 'text-[hsl(var(--gold))]'
-                          : 'text-foreground hover:text-[hsl(var(--gold))]'
-                    )}
-                  >
-                    {link.label}
-                    {link.children && <ChevronDown className="w-4 h-4" />}
-                    {link.highlight && (
-                      <span className="bg-destructive text-destructive-foreground text-xs px-2 py-0.5 rounded-full font-bold">
-                        Sale
-                      </span>
-                    )}
-                  </Link>
+              {navLinks.map((link) => {
+                // Get children for the link
+                const children = link.hasDynamicChildren 
+                  ? brands.map(brand => ({
+                      label: brand.name,
+                      href: `/products?brand=${encodeURIComponent(brand.name)}`,
+                      slug: brand.slug
+                    }))
+                  : link.children;
 
-                  {/* Dropdown */}
-                  <AnimatePresence>
-                    {link.children && activeDropdown === link.label && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        transition={{ duration: 0.2 }}
-                        className="absolute top-full left-0 mt-2 w-48 bg-card rounded-lg shadow-xl border border-border overflow-hidden z-50"
+                return (
+                  <div
+                    key={link.label}
+                    className="relative"
+                    onMouseEnter={() => children && setActiveDropdown(link.label)}
+                    onMouseLeave={() => setActiveDropdown(null)}
+                  >
+                    {link.href === '#' ? (
+                      <span
+                        className={cn(
+                          'flex items-center gap-1 font-medium transition-colors py-2 text-sm uppercase tracking-wide cursor-pointer',
+                          'text-foreground hover:text-[hsl(var(--gold))]'
+                        )}
                       >
-                        {link.children.map((child) => (
-                          <Link
-                            key={child.label}
-                            to={child.href}
-                            className="block px-4 py-3 hover:bg-accent/10 transition-colors text-foreground hover:text-[hsl(var(--gold))]"
-                          >
-                            {child.label}
-                          </Link>
-                        ))}
-                      </motion.div>
+                        {link.label}
+                        {children && <ChevronDown className="w-4 h-4" />}
+                      </span>
+                    ) : (
+                      <Link
+                        to={link.href}
+                        onClick={() => handleSegmentClick(link.segment)}
+                        className={cn(
+                          'flex items-center gap-1 font-medium transition-colors py-2 text-sm uppercase tracking-wide',
+                          link.highlight 
+                            ? 'text-destructive font-semibold flex items-center gap-2' 
+                            : isActiveLink(link.href)
+                              ? 'text-[hsl(var(--gold))]'
+                              : 'text-foreground hover:text-[hsl(var(--gold))]'
+                        )}
+                      >
+                        {link.label}
+                        {children && <ChevronDown className="w-4 h-4" />}
+                        {link.highlight && (
+                          <span className="bg-destructive text-destructive-foreground text-xs px-2 py-0.5 rounded-full font-bold">
+                            Sale
+                          </span>
+                        )}
+                      </Link>
                     )}
-                  </AnimatePresence>
-                </div>
-              ))}
+
+                    {/* Dropdown */}
+                    <AnimatePresence>
+                      {children && activeDropdown === link.label && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 10 }}
+                          transition={{ duration: 0.2 }}
+                          className="absolute top-full left-0 mt-2 w-48 bg-card rounded-lg shadow-xl border border-border overflow-hidden z-50 max-h-[400px] overflow-y-auto"
+                        >
+                          {children.map((child) => (
+                            <Link
+                              key={child.label}
+                              to={child.href}
+                              className="block px-4 py-3 hover:bg-accent/10 transition-colors text-foreground hover:text-[hsl(var(--gold))]"
+                            >
+                              {child.label}
+                            </Link>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
             </div>
           </div>
           
@@ -469,37 +500,85 @@ export default function Header() {
               </div>
 
               <nav className="flex flex-col gap-1">
-                {navLinks.map((link, index) => (
-                  <motion.div
-                    key={link.label}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                  >
-                    <Link
-                      to={link.href}
-                      onClick={() => {
-                        handleSegmentClick(link.segment);
-                        setIsMobileMenuOpen(false);
-                      }}
-                      className={cn(
-                        'flex items-center justify-between py-3 text-base font-medium border-b border-border transition-colors',
-                        link.highlight 
-                          ? 'text-destructive' 
-                          : isActiveLink(link.href)
-                            ? 'text-[hsl(var(--gold))]'
-                            : 'text-foreground hover:text-[hsl(var(--gold))]'
-                      )}
+                {navLinks.map((link, index) => {
+                  const children = link.hasDynamicChildren 
+                    ? brands.map(brand => ({
+                        label: brand.name,
+                        href: `/products?brand=${encodeURIComponent(brand.name)}`,
+                        slug: brand.slug
+                      }))
+                    : link.children;
+
+                  return (
+                    <motion.div
+                      key={link.label}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
                     >
-                      <span>{link.label}</span>
-                      {link.highlight && (
-                        <span className="bg-destructive text-destructive-foreground text-xs px-2 py-0.5 rounded-full font-bold">
-                          Sale
-                        </span>
+                      {children ? (
+                        <div>
+                          <button
+                            onClick={() => setActiveDropdown(activeDropdown === link.label ? null : link.label)}
+                            className="flex items-center justify-between py-3 text-base font-medium border-b border-border transition-colors w-full text-left text-foreground hover:text-[hsl(var(--gold))]"
+                          >
+                            <span>{link.label}</span>
+                            <ChevronDown className={cn(
+                              "w-4 h-4 transition-transform",
+                              activeDropdown === link.label && "rotate-180"
+                            )} />
+                          </button>
+                          <AnimatePresence>
+                            {activeDropdown === link.label && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pl-4 py-2 max-h-[300px] overflow-y-auto">
+                                  {children.map((child) => (
+                                    <Link
+                                      key={child.label}
+                                      to={child.href}
+                                      onClick={() => setIsMobileMenuOpen(false)}
+                                      className="block py-2 text-sm text-muted-foreground hover:text-[hsl(var(--gold))] transition-colors"
+                                    >
+                                      {child.label}
+                                    </Link>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      ) : (
+                        <Link
+                          to={link.href}
+                          onClick={() => {
+                            handleSegmentClick(link.segment);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={cn(
+                            'flex items-center justify-between py-3 text-base font-medium border-b border-border transition-colors',
+                            link.highlight 
+                              ? 'text-destructive' 
+                              : isActiveLink(link.href)
+                                ? 'text-[hsl(var(--gold))]'
+                                : 'text-foreground hover:text-[hsl(var(--gold))]'
+                          )}
+                        >
+                          <span>{link.label}</span>
+                          {link.highlight && (
+                            <span className="bg-destructive text-destructive-foreground text-xs px-2 py-0.5 rounded-full font-bold">
+                              Sale
+                            </span>
+                          )}
+                        </Link>
                       )}
-                    </Link>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  );
+                })}
               </nav>
 
               {/* Need Help - Mobile */}

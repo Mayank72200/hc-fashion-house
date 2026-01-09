@@ -71,7 +71,11 @@ def brand_to_dict(brand: Brand) -> dict:
         "id": brand.id,
         "name": brand.name,
         "slug": brand.slug,
-        "logo_url": brand.logo_url,
+        "logo_cloudinary_url": brand.logo_cloudinary_url,
+        "logo_folder_path": brand.logo_folder_path,
+        "logo_public_id": brand.logo_public_id,
+        "logo_width": brand.logo_width,
+        "logo_height": brand.logo_height,
         "is_active": brand.is_active,
         "created_at": brand.created_at,
     }
@@ -346,7 +350,11 @@ class BrandService:
         brand = Brand(
             name=brand_data.name,
             slug=slug,
-            logo_url=brand_data.logo_url,
+            logo_cloudinary_url=brand_data.logo_cloudinary_url,
+            logo_folder_path=brand_data.logo_folder_path,
+            logo_public_id=brand_data.logo_public_id,
+            logo_width=brand_data.logo_width,
+            logo_height=brand_data.logo_height,
             is_active=brand_data.is_active
         )
         db.add(brand)

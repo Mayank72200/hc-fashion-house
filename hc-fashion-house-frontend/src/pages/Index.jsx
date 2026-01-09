@@ -332,7 +332,7 @@ export default function Index() {
           .filter(brand => brand.is_active)
           .map(brand => ({
             name: brand.name,
-            logo: brand.logo_url || brand.logo
+            logo: brand.logo_cloudinary_url || brand.logo_url || brand.logo
           }));
         setBrands(transformedBrands);
       } catch (error) {
@@ -535,7 +535,7 @@ export default function Index() {
   return (
     <Layout>
       {/* Hero Section - Carousel Style */}
-      <section className="relative min-h-[100svh] md:min-h-[75vh] bg-background overflow-hidden pt-16 md:pt-20">
+      <section className="relative h-[88svh] md:min-h-[75vh] bg-background overflow-hidden pt-16 md:pt-20">
         {/* Infinite Grid Background with Floating Shoes */}
         <InfiniteGridBackground
           gridSize={50}
@@ -587,10 +587,10 @@ export default function Index() {
           ]}
         />
         
-        <div className="container min-h-[calc(75vh-5rem)] relative z-10">
-          <div className="grid lg:grid-cols-2 gap-0 md:gap-4 items-center min-h-[calc(75vh-5rem)] py-2 md:py-4">
+        <div className="container min-h-[calc(88svh-5rem)] md:min-h-[calc(75vh-5rem)] relative z-10">
+          <div className="grid lg:grid-cols-2 gap-0 md:gap-4 items-center min-h-[calc(88svh-5rem)] md:min-h-[calc(75vh-5rem)] py-2 md:py-4">
             {/* Left Content - Text */}
-            <div className="relative z-10 order-2 lg:order-1 text-center lg:text-left mt-0 -translate-y-16 md:translate-y-0 mb-0 pb-0">
+            <div className="relative z-10 order-2 lg:order-1 text-center lg:text-left mt-6 md:mt-0 md:translate-y-0 mb-0 pb-0">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={currentSlide}
@@ -803,7 +803,7 @@ export default function Index() {
           </button>
 
           {/* Navigation Dots */}
-          <div className="absolute bottom-12 md:bottom-10 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-3 z-30">
+          <div className="absolute bottom-1 md:bottom-6 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-3 z-30">
             {heroSlides.map((_, index) => (
               <button
                 key={index}

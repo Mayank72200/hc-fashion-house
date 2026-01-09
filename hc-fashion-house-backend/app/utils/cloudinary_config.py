@@ -46,26 +46,53 @@ def configure_cloudinary() -> None:
 
 
 def generate_product_variant_folder(
-    product_type: str,
+    platform_slug: str,
+    brand_slug: str,
+    catalogue_slug: str,
     product_slug: str,
-    variant_slug: str,
-    usage_type: str
+    usage_type: str = "catalogue"
 ) -> str:
     """
-    Generate Cloudinary folder path for product variant media.
-
-    Structure: ecommerce/products/{product_type}/{product_slug}/variants/{variant_slug}/{usage_type}/
+    Generate Cloudinary folder path for product media.
+    
+    ⚠️ IMPORTANT: Images belong to PRODUCT (color SKU), NOT to variants (sizes)!
+    
+    Structure: ecommerce/products/{platform_slug}/{brand_slug}/{catalogue_slug}/{product_slug}/{usage_type}/
+    
+    Example: ecommerce/products/footwear/yostar/hr-416/hr-416-white-grey/catalogue/
 
     Args:
-        product_type: Type of product (footwear, clothing, accessory)
-        product_slug: URL-safe product slug
-        variant_slug: URL-safe variant slug
-        usage_type: Either 'catalogue' or 'lifestyle'
+        platform_slug: Platform slug (footwear, clothing, accessory)
+        brand_slug: Brand slug (e.g., yostar, nike, adidas)
+        catalogue_slug: Catalogue/Article slug (e.g., hr-416)
+        product_slug: Full product slug (e.g., hr-416-white-grey)
+        usage_type: Either 'catalogue' or 'lifestyle' (default: 'catalogue')
 
     Returns:
         Full folder path string
     """
-    return f"ecommerce/products/{product_type}/{product_slug}/variants/{variant_slug}/{usage_type}"
+    return f"ecommerce/products/{platform_slug}/{brand_slug}/{catalogue_slug}/{product_slug}/{usage_type}"
+
+
+def generate_color_slug(color: str) -> str:
+    """
+    Generate URL-safe color slug for folder naming.
+    
+    Args:
+        color: Color name (e.g., "White/Grey", "Black")
+    
+    Returns:
+        URL-safe color slug (e.g., "white-grey", "black")
+    """
+    if not color:
+        return "default"
+    
+    import re
+    # Remove special characters and spaces, convert to lowercase
+    slug = re.sub(r'[^a-z0-9]+', '-', color.lower().strip())
+    # Remove leading/trailing hyphens
+    slug = slug.strip('-')
+    return slug or "default"
 
 
 def generate_catalogue_banner_folder(catalogue_slug: str) -> str:
@@ -84,6 +111,24 @@ def generate_category_banner_folder(category_slug: str) -> str:
     Structure: ecommerce/categories/{category_slug}/banner/
     """
     return f"ecommerce/categories/{category_slug}/banner"
+
+
+def generate_brand_media_folder(brand_slug: str, usage_type: str = "logo") -> str:
+    """
+    Generate Cloudinary folder path for brand media assets.
+
+    Structure: ecommerce/brands/{brand_slug}/{usage_type}/
+    
+    Args:
+        brand_slug: Brand slug (e.g., yostar, nike, adidas)
+        usage_type: Type of brand media (logo, banner, icon)
+    
+    Returns:
+        Full folder path string
+    
+    Example: ecommerce/brands/yostar/logo/
+    """
+    return f"ecommerce/brands/{brand_slug}/{usage_type}"
 
 
 def generate_global_folder(folder_type: str) -> str:

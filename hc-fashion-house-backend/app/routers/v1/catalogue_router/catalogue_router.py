@@ -229,6 +229,7 @@ def get_product_listing(
     catalogue_id: Optional[int] = Query(None, description="Filter by catalogue ID"),
     platform_slug: Optional[str] = Query(None, description="Filter by platform slug (footwear, clothing)"),
     brand_id: Optional[int] = Query(None, description="Filter by brand ID"),
+    brand: Optional[str] = Query(None, description="Filter by brand name"),
     gender: Optional[Gender] = Query(None, description="Filter by gender (from catalogue)"),
     is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
     tags: Optional[str] = Query(None, description="Filter by tags (comma-separated, e.g., 'new,trending,featured')"),
@@ -248,6 +249,13 @@ def get_product_listing(
     - Discount percentage calculated
     - In-stock status included
     """
+    # Convert brand name to brand_id if provided
+    if brand and not brand_id:
+        from database.db_models import Brand
+        brand_obj = db.query(Brand).filter(Brand.name == brand).first()
+        if brand_obj:
+            brand_id = brand_obj.id
+    
     skip = (page - 1) * per_page
     items, total, filters_applied = ProductListingService.get_product_listing(
         db,

@@ -20,6 +20,7 @@ from models.media_models import (
 from utils.cloudinary_config import (
     configure_cloudinary,
     generate_product_variant_folder,
+    generate_color_slug,
     generate_catalogue_banner_folder,
     generate_category_banner_folder,
     generate_global_folder,
@@ -246,7 +247,10 @@ class MediaUploadService:
         upload_data: ProductVariantMediaUpload
     ) -> MediaAsset:
         """
-        Upload media for a product variant.
+        Upload media for a product (color SKU).
+        
+        ⚠️ IMPORTANT: Images belong to PRODUCT (color), NOT to variants (sizes)!
+        All sizes of the same color share the same images.
 
         Args:
             db: Database session
@@ -264,22 +268,40 @@ class MediaUploadService:
             db, upload_data.product_id, upload_data.variant_id
         )
 
-        # Generate folder path
-        variant_slug = variant.sku.lower().replace("-", "-") if variant.sku else f"variant-{variant.id}"
-        # Get product type from category -> platform hierarchy
-        product_type = product.category.platform.slug if product.category and product.category.platform else "general"
+        # Get catalogue and platform information
+        catalogue = product.catalogue
+        if not catalogue:
+            raise BusinessRuleException(
+                message="Product must belong to a catalogue",
+                rule="catalogue_required"
+            )
+        
+        platform = product.category.platform if product.category and product.category.platform else None
+        if not platform:
+            raise BusinessRuleException(
+                message="Product must belong to a platform via category",
+                rule="platform_required"
+            )
+
+        # Get brand information (may be None)
+        brand = product.brand
+        brand_slug = brand.slug if brand else "no-brand"
+        
+        # Generate folder path: ecommerce/products/{platform_slug}/{brand_slug}/{catalogue_slug}/{product_slug}/{usage_type}/
         folder_path = generate_product_variant_folder(
-            product_type=product_type,
+            platform_slug=platform.slug,
+            brand_slug=brand_slug,
+            catalogue_slug=catalogue.slug,
             product_slug=product.slug,
-            variant_slug=variant_slug,
             usage_type=upload_data.usage_type.value
         )
 
-        # If setting as primary, unset other primary images for this variant
+        # If setting as primary, unset other primary images for this PRODUCT (not variant)
+        # All variants of the same product/color share images
         if upload_data.is_primary:
             self._unset_primary_media(
                 db,
-                variant_id=upload_data.variant_id,
+                product_id=upload_data.product_id,
                 usage_type=upload_data.usage_type.value
             )
 
@@ -287,6 +309,7 @@ class MediaUploadService:
         upload_result = await self.upload_to_cloudinary(file, folder_path, "image")
 
         # Create database record
+        # Note: We still store variant_id for backward compatibility, but images are product-level
         media_asset = self.create_media_asset(
             db=db,
             upload_result=upload_result,

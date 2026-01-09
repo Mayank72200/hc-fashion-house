@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Filter, Grid, List, ChevronDown, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,29 +11,67 @@ import Layout from '@/components/layout/Layout';
 import ProductCard from '@/components/products/ProductCard';
 import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
-import { segmentBrands } from '@/data/products';
 import { useProducts } from '@/hooks/useProducts';
-
-// All brands combined
-const allBrands = [...new Set([
-  ...segmentBrands.men,
-  ...segmentBrands.women,
-  ...segmentBrands.kids,
-])].sort();
+import { BrandAPI } from '@/lib/api';
 
 // All sizes
 const allSizes = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 export default function AllProducts() {
   const { setSegment } = useTheme();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState('grid');
   const [sortBy, setSortBy] = useState('featured');
   const [priceRange, setPriceRange] = useState([0, 20000]);
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState([0, 20000]);
   const [selectedBrands, setSelectedBrands] = useState([]);
   const [selectedSizes, setSelectedSizes] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [brands, setBrands] = useState([]);
+  const scrollPositionRef = useRef(0);
+
+  // Debounce price range changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedPriceRange(priceRange);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [priceRange]);
+
+  // Save scroll position before filter changes
+  const saveScrollPosition = useCallback(() => {
+    scrollPositionRef.current = window.scrollY;
+  }, []);
+
+  // Restore scroll position after filter changes
+  useEffect(() => {
+    if (scrollPositionRef.current > 0) {
+      window.scrollTo(0, scrollPositionRef.current);
+    }
+  }, [selectedBrands, selectedSizes, selectedCategory, debouncedPriceRange]);
+
+  // Fetch brands from API
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        const brandsData = await BrandAPI.getBrands({ limit: 100 });
+        setBrands(brandsData || []);
+      } catch (error) {
+        console.error('Error fetching brands:', error);
+      }
+    };
+    fetchBrands();
+  }, []);
+
+  // Initialize from URL params on mount
+  useEffect(() => {
+    const brandParam = searchParams.get('brand');
+    if (brandParam) {
+      setSelectedBrands([brandParam]);
+    }
+  }, []); // Only run on mount
 
   // Fetch products from API
   const { 
@@ -44,8 +83,8 @@ export default function AllProducts() {
   } = useProducts({
     gender: selectedCategory !== 'all' ? selectedCategory : undefined,
     brand: selectedBrands.length === 1 ? selectedBrands[0] : undefined,
-    minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
-    maxPrice: priceRange[1] < 20000 ? priceRange[1] : undefined,
+    minPrice: debouncedPriceRange[0] > 0 ? debouncedPriceRange[0] : undefined,
+    maxPrice: debouncedPriceRange[1] < 20000 ? debouncedPriceRange[1] : undefined,
     page: currentPage,
     perPage: 24,
   });
@@ -58,18 +97,21 @@ export default function AllProducts() {
   }, [setSegment]);
 
   const toggleBrand = (brand) => {
+    saveScrollPosition();
     setSelectedBrands(prev => 
       prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]
     );
   };
 
   const toggleSize = (size) => {
+    saveScrollPosition();
     setSelectedSizes(prev => 
       prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]
     );
   };
 
   const clearFilters = () => {
+    saveScrollPosition();
     setSelectedBrands([]);
     setSelectedSizes([]);
     setPriceRange([0, 20000]);
@@ -129,14 +171,14 @@ export default function AllProducts() {
       <div>
         <h4 className="font-semibold mb-3 text-foreground">Brands</h4>
         <div className="space-y-2 max-h-48 overflow-y-auto">
-          {allBrands.map(brand => (
-            <label key={brand} className="flex items-center gap-2 cursor-pointer group">
+          {brands.map(brand => (
+            <label key={brand.id} className="flex items-center gap-2 cursor-pointer group">
               <Checkbox 
-                checked={selectedBrands.includes(brand)}
-                onCheckedChange={() => toggleBrand(brand)}
+                checked={selectedBrands.includes(brand.name)}
+                onCheckedChange={() => toggleBrand(brand.name)}
                 className="border-[#C9A24D] data-[state=checked]:bg-[#C9A24D] data-[state=checked]:border-[#C9A24D]"
               />
-              <span className="text-sm group-hover:text-[#C9A24D] transition-colors">{brand}</span>
+              <span className="text-sm group-hover:text-[#C9A24D] transition-colors">{brand.name}</span>
             </label>
           ))}
         </div>

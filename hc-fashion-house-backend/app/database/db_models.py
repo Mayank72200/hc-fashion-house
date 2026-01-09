@@ -45,7 +45,17 @@ class Brand(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False, unique=True)
     slug = Column(String(255), nullable=False, unique=True)
+    
+    # Old field (deprecated, kept for backwards compatibility)
     logo_url = Column(Text, nullable=True)
+    
+    # New Cloudinary fields
+    logo_cloudinary_url = Column(Text, nullable=True)
+    logo_folder_path = Column(Text, nullable=True)
+    logo_public_id = Column(String(255), nullable=True)
+    logo_width = Column(Integer, nullable=True)
+    logo_height = Column(Integer, nullable=True)
+    
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

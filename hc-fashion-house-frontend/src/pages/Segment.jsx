@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Filter, Grid, List, ChevronDown, X, Sparkles, Loader2 } from 'lucide-react';
@@ -13,6 +13,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
 import { segmentInfo, segmentBrands } from '@/data/products';
 import { useProducts, getBrandsForSegment } from '@/hooks/useProducts';
+import { BrandAPI } from '@/lib/api';
 
 const validSegments = ['men', 'women', 'kids'];
 const sizes = {
@@ -27,15 +28,51 @@ export default function Segment() {
   const [viewMode, setViewMode] = useState('grid');
   const [sortBy, setSortBy] = useState('featured');
   const [priceRange, setPriceRange] = useState([0, 20000]);
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState([0, 20000]);
   const [selectedBrands, setSelectedBrands] = useState([]);
   const [selectedSizes, setSelectedSizes] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [brands, setBrands] = useState([]);
+  const scrollPositionRef = useRef(0);
 
   // Validate segment - redirect to 404 if invalid
   if (!validSegments.includes(segment)) {
     return <Navigate to="/404" replace />;
   }
+
+  // Fetch brands from API
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        const brandsData = await BrandAPI.getBrands({ limit: 100 });
+        setBrands(brandsData || []);
+      } catch (error) {
+        console.error('Error fetching brands:', error);
+      }
+    };
+    fetchBrands();
+  }, []);
+
+  // Debounce price range changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedPriceRange(priceRange);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [priceRange]);
+
+  // Save scroll position before filter changes
+  const saveScrollPosition = useCallback(() => {
+    scrollPositionRef.current = window.scrollY;
+  }, []);
+
+  // Restore scroll position after filter changes
+  useEffect(() => {
+    if (scrollPositionRef.current > 0) {
+      window.scrollTo(0, scrollPositionRef.current);
+    }
+  }, [selectedBrands, selectedSizes, debouncedPriceRange]);
 
   // Fetch products from API with filters
   const { 
@@ -47,14 +84,13 @@ export default function Segment() {
   } = useProducts({
     gender: segment,
     brand: selectedBrands.length === 1 ? selectedBrands[0] : undefined,
-    minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
-    maxPrice: priceRange[1] < 20000 ? priceRange[1] : undefined,
+    minPrice: debouncedPriceRange[0] > 0 ? debouncedPriceRange[0] : undefined,
+    maxPrice: debouncedPriceRange[1] < 20000 ? debouncedPriceRange[1] : undefined,
     page: currentPage,
     perPage: 20,
   });
 
   const info = segmentInfo[segment];
-  const brands = segmentBrands[segment] || getBrandsForSegment(segment);
   const segmentSizes = sizes[segment];
 
   useEffect(() => {
@@ -66,18 +102,21 @@ export default function Segment() {
   }, [segment, setThemeSegment]);
 
   const toggleBrand = (brand) => {
+    saveScrollPosition();
     setSelectedBrands(prev => 
       prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]
     );
   };
 
   const toggleSize = (size) => {
+    saveScrollPosition();
     setSelectedSizes(prev => 
       prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]
     );
   };
 
   const clearFilters = () => {
+    saveScrollPosition();
     setSelectedBrands([]);
     setSelectedSizes([]);
     setPriceRange([0, 20000]);
@@ -114,15 +153,15 @@ export default function Segment() {
       {/* Brands */}
       <div>
         <h4 className="font-semibold mb-3 text-foreground">Brands</h4>
-        <div className="space-y-2">
+        <div className="space-y-2 max-h-48 overflow-y-auto">
           {brands.map(brand => (
-            <label key={brand} className="flex items-center gap-2 cursor-pointer group">
+            <label key={brand.id} className="flex items-center gap-2 cursor-pointer group">
               <Checkbox 
-                checked={selectedBrands.includes(brand)}
-                onCheckedChange={() => toggleBrand(brand)}
+                checked={selectedBrands.includes(brand.name)}
+                onCheckedChange={() => toggleBrand(brand.name)}
                 className="border-accent data-[state=checked]:bg-accent data-[state=checked]:border-accent"
               />
-              <span className="text-sm group-hover:text-accent transition-colors">{brand}</span>
+              <span className="text-sm group-hover:text-accent transition-colors">{brand.name}</span>
             </label>
           ))}
         </div>

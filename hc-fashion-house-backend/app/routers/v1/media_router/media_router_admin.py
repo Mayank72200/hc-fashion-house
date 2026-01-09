@@ -77,19 +77,25 @@ async def check_cloudinary_health():
     "/product-variant",
     response_model=MediaUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload Product Variant Media",
+    summary="Upload Product Media (Color SKU)",
     description="""
-    Upload an image for a product variant.
+    Upload an image for a product (color SKU).
     
-    **Folder Structure**: `ecommerce/products/{product_type}/{product_slug}/variants/{variant_slug}/{usage_type}/`
+    ⚠️ **IMPORTANT**: Images belong to PRODUCT (color), NOT to variants (sizes)!
+    All sizes of the same color share the same images.
+    
+    **Folder Structure**: `ecommerce/products/{platform_slug}/{catalogue_slug}/{color_slug}/{usage_type}/`
+    
+    **Example**: `ecommerce/products/footwear/hr-416/white-grey/catalogue/01.jpg`
     
     **Usage Types**:
-    - `catalogue`: Product page images (hero, side, sole)
-    - `lifestyle`: Real-world, on-feet shots
+    - `catalogue`: Product page images (hero, side, sole, detail shots)
+    - `lifestyle`: Real-world, on-feet, lifestyle shots
     
     **Rules**:
     - One image should have `is_primary=true` for catalogue images
     - Display order is controlled by `display_order` (lower = shown first)
+    - Images are shared across all size variants of the same color
     """
 )
 async def upload_product_variant_media(

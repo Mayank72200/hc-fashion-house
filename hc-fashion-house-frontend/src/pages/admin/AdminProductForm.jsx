@@ -133,6 +133,31 @@ const SIZE_OPTIONS = {
   unisex: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14'],
 };
 
+// Size options based on size chart type (IND, UK, EU)
+const SIZE_OPTIONS_BY_CHART_TYPE = {
+  IND: {
+    men: ['6', '7', '8', '9', '10', '11', '12', '13', '14'],
+    women: ['3', '4', '5', '6', '7', '8', '9', '10'],
+    boys: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20'],
+    girls: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20'],
+    unisex: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14'],
+  },
+  UK: {
+    men: ['6', '7', '8', '9', '10', '11', '12', '13', '14'],
+    women: ['3', '4', '5', '6', '7', '8', '9', '10'],
+    boys: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20'],
+    girls: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20'],
+    unisex: ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14'],
+  },
+  EU: {
+    men: ['40', '41', '42', '43', '44', '45', '46', '47', '48'],
+    women: ['36', '37', '38', '39', '40', '41', '42', '43'],
+    boys: ['17', '18', '19', '20', '21', '23', '24', '25', '27', '28', '29', '30', '31', '33', '34', '35', '36', '37', '38'],
+    girls: ['17', '18', '19', '20', '21', '23', '24', '25', '27', '28', '29', '30', '31', '33', '34', '35', '36', '37', '38'],
+    unisex: ['37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48'],
+  },
+};
+
 const COLOR_OPTIONS = [
   { name: 'Black', hex: '#000000' },
   { name: 'White', hex: '#FFFFFF' },
@@ -955,7 +980,11 @@ function ProductTab({
   onCreateBrand,
   canRemove 
 }) {
-  const availableSizes = SIZE_OPTIONS[catalogueData.gender] || SIZE_OPTIONS.men;
+  // Get sizes based on size chart type and gender
+  const sizeChartType = product.footwearDetails?.sizeChartType || 'IND';
+  const availableSizes = SIZE_OPTIONS_BY_CHART_TYPE[sizeChartType]?.[catalogueData.gender] || 
+                         SIZE_OPTIONS_BY_CHART_TYPE['IND'][catalogueData.gender] || 
+                         SIZE_OPTIONS.men;
   const baseSKU = generateSKU(catalogueData.article, product.color, '');
 
   const handleSizeToggle = (size, checked) => {
@@ -1097,15 +1126,45 @@ function ProductTab({
 
       {/* Size Selection Section */}
       <div className="bg-card border border-border rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-6 flex items-center gap-2">
-          <Package className="w-5 h-5 text-primary" />
-          Sizes & Variants
-        </h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <Package className="w-5 h-5 text-primary" />
+            Sizes & Variants
+          </h3>
+          
+          {/* Size Chart Type - Right Side */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`sizeChartType-${index}`} className="text-sm font-medium whitespace-nowrap">
+              Size Chart Type <span className="text-red-500">*</span>
+            </Label>
+            <Select
+              value={product.footwearDetails?.sizeChartType || 'IND'}
+              onValueChange={(value) => {
+                // Clear selected sizes when changing size chart type
+                onUpdate({
+                  ...product,
+                  footwearDetails: { ...product.footwearDetails, sizeChartType: value },
+                  selectedSizes: [],
+                  sizeVariants: {},
+                });
+              }}
+            >
+              <SelectTrigger className="h-10 w-[140px]">
+                <SelectValue placeholder="Select" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="IND">IND</SelectItem>
+                <SelectItem value="UK">UK</SelectItem>
+                <SelectItem value="EU">EU</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* Size Checkboxes */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
-            <Label>Select Available Sizes (UK)</Label>
+            <Label>Select Available Sizes ({product.footwearDetails?.sizeChartType || 'IND'})</Label>
             <p className="text-xs text-blue-600 dark:text-blue-400">
               💡 Fill first size to auto-fill others
             </p>
@@ -1261,7 +1320,7 @@ function ProductTab({
         <h3 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
           <Settings2 className="w-5 h-5 text-primary" />
           Footwear Details
-          <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded">Optional</span>
+          <span className="text-xs font-normal text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">Optional</span>
         </h3>
         <p className="text-sm text-muted-foreground mb-6">
           Additional specifications for footwear products. These help customers make informed decisions.
@@ -1379,29 +1438,6 @@ function ProductTab({
               placeholder="e.g., 250, 350, 450"
               className="h-11"
             />
-          </div>
-
-          {/* Size Chart Type */}
-          <div className="space-y-2 md:col-span-2 lg:col-span-1">
-            <Label htmlFor={`sizeChartType-${index}`}>Size Chart Type</Label>
-            <Select
-              value={product.footwearDetails?.sizeChartType || ''}
-              onValueChange={(value) => onUpdate({
-                ...product,
-                footwearDetails: { ...product.footwearDetails, sizeChartType: value }
-              })}
-            >
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Select size chart" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="uk">UK Sizes</SelectItem>
-                <SelectItem value="us">US Sizes</SelectItem>
-                <SelectItem value="eu">EU Sizes</SelectItem>
-                <SelectItem value="uk-us">UK/US Combined</SelectItem>
-                <SelectItem value="universal">Universal</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
         </div>
       </div>

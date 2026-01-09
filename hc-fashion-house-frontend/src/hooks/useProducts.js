@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ProductAPI, CatalogueAPI, CategoryAPI, PRODUCT_TAGS } from '@/lib/api';
 import { menProducts, womenProducts, kidsProducts, segmentBrands } from '@/data/products';
+import { toIndianSizes } from '@/utils/sizeConversion';
 
 // Check if API is available
 const API_ENABLED = Boolean(import.meta.env.VITE_API_URL);
@@ -34,6 +35,22 @@ function transformProduct(apiProduct) {
     brandName = apiProduct.brand_name;
   }
   
+  // Convert sizes to IND format for display
+  // Get size chart type from footwear_details or raw data
+  const sizeChartType = apiProduct.footwear_details?.size_chart_type || 
+                        apiProduct._raw?.footwear_details?.size_chart_type || 
+                        apiProduct.size_chart_type || 
+                        'IND';
+  
+  // Get gender for size conversion
+  const gender = apiProduct.gender || 'men';
+  
+  // Convert available sizes to IND format
+  let displaySizes = apiProduct.available_sizes || [];
+  if (sizeChartType && sizeChartType !== 'IND') {
+    displaySizes = toIndianSizes(displaySizes, sizeChartType, gender);
+  }
+  
   return {
     id: apiProduct.id,
     slug: apiProduct.slug,
@@ -43,7 +60,9 @@ function transformProduct(apiProduct) {
     mrp: mrp > price ? mrp : null,  // Only show MRP if different from price
     image: apiProduct.primary_image_url || apiProduct.image_url || 'https://via.placeholder.com/400x400?text=No+Image',
     images: apiProduct.images || [apiProduct.primary_image_url || 'https://via.placeholder.com/400x400?text=No+Image'],
-    sizes: apiProduct.available_sizes || [],
+    sizes: displaySizes, // Converted to IND sizes for display
+    originalSizes: apiProduct.available_sizes || [], // Keep original sizes
+    sizeChartType: sizeChartType, // Original size system
     colors: apiProduct.available_colors || [],
     color: apiProduct.color, // Primary color of this product SKU
     colorHex: apiProduct.color_hex, // Hex color code
@@ -295,22 +314,41 @@ export function useProductDetail(productId) {
           const primaryImage = images[0] || '/placeholder.jpg';
           
           // Get sizes from availability.sizes if available, otherwise from variants
+          // Store the original size chart type for conversion
+          const sizeChartType = apiProduct.footwear_details?.size_chart_type || 'IND';
+          const gender = apiProduct.gender || 'men';
+          
           const availabilitySizes = response.availability?.sizes || [];
           const sizes = availabilitySizes.length > 0
-            ? availabilitySizes.map(s => ({
-                uk: s.size,
-                eu: String(parseInt(s.size) + 33),
-                inStock: s.is_available && s.stock_quantity > 0,
-                stock: s.stock_quantity,
-                variantId: s.variant_id,
-              }))
-            : (apiProduct.variants || []).map(v => ({
-                uk: v.size,
-                eu: String(parseInt(v.size) + 33),
-                inStock: v.stock_quantity > 0,
-                stock: v.stock_quantity,
-                sku: v.sku,
-              }));
+            ? availabilitySizes.map(s => {
+                // Convert size to IND for display
+                const originalSize = s.size;
+                const indSizes = toIndianSizes([originalSize], sizeChartType, gender);
+                const indSize = indSizes[0] || originalSize;
+                
+                return {
+                  ind: indSize,
+                  originalSize: originalSize,
+                  sizeChartType: sizeChartType,
+                  inStock: s.is_available && s.stock_quantity > 0,
+                  stock: s.stock_quantity,
+                  variantId: s.variant_id,
+                };
+              })
+            : (apiProduct.variants || []).map(v => {
+                const originalSize = v.size;
+                const indSizes = toIndianSizes([originalSize], sizeChartType, gender);
+                const indSize = indSizes[0] || originalSize;
+                
+                return {
+                  ind: indSize,
+                  originalSize: originalSize,
+                  sizeChartType: sizeChartType,
+                  inStock: v.stock_quantity > 0,
+                  stock: v.stock_quantity,
+                  sku: v.sku,
+                };
+              });
           
           // Transform footwear_details to specifications format
           // API: footwear_details: { upper_material, sole_material, ... }
@@ -365,6 +403,7 @@ export function useProductDetail(productId) {
             image: primaryImage,
             images: images,
             sizes: sizes,
+            sizeChartType: sizeChartType, // Original size system for conversion UI
             color: apiProduct.color,
             colorHex: apiProduct.color_hex,
             catalogueId: apiProduct.catalogue_id,

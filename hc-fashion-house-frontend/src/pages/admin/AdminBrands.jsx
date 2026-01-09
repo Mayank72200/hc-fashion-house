@@ -51,10 +51,10 @@ function BrandModal({ isOpen, onClose, brand, onSave }) {
       setFormData({
         name: brand.name || '',
         slug: brand.slug || '',
-        logo: brand.logo_url || brand.logo || '',
+        logo: brand.logo_cloudinary_url || brand.logo_url || brand.logo || '',
         is_active: brand.is_active !== false,
       });
-      setLogoPreview(brand.logo_url || brand.logo || null);
+      setLogoPreview(brand.logo_cloudinary_url || brand.logo_url || brand.logo || null);
     } else {
       setFormData({
         name: '',
@@ -95,23 +95,43 @@ function BrandModal({ isOpen, onClose, brand, onSave }) {
 
     try {
       let logoUrl = formData.logo;
+      let logoData = {};
 
       // Upload logo if a new file was selected
       if (logoFile) {
         try {
-          const uploadResult = await AdminBrandAPI.uploadLogo(logoFile);
+          // Use the slug for folder organization
+          const slugToUse = formData.slug || brand?.slug || 'temp';
+          const uploadResult = await AdminBrandAPI.uploadLogo(logoFile, slugToUse);
+          // uploadResult contains: { url, public_id, folder_path, width, height }
           logoUrl = uploadResult.url;
+          logoData = {
+            logo_cloudinary_url: uploadResult.url,
+            logo_folder_path: uploadResult.folder_path,
+            logo_public_id: uploadResult.public_id,
+            logo_width: uploadResult.width,
+            logo_height: uploadResult.height,
+          };
         } catch (uploadError) {
           setError(`Failed to upload logo: ${uploadError.message}`);
           setSaving(false);
           return;
         }
+      } else if (logoUrl) {
+        // If existing logo, keep the Cloudinary fields
+        logoData = {
+          logo_cloudinary_url: brand?.logo_cloudinary_url || logoUrl,
+          logo_folder_path: brand?.logo_folder_path,
+          logo_public_id: brand?.logo_public_id,
+          logo_width: brand?.logo_width,
+          logo_height: brand?.logo_height,
+        };
       }
 
       const data = {
         name: formData.name,
         slug: formData.slug,
-        logo_url: logoUrl,
+        ...logoData,
         is_active: formData.is_active,
       };
 
@@ -477,9 +497,9 @@ export default function AdminBrands() {
                 <tr key={brand.id} className="border-t hover:bg-muted/30 transition-colors">
                   <td className="p-4">
                     <div className="w-12 h-12 rounded-lg bg-white border flex items-center justify-center overflow-hidden">
-                      {(brand.logo_url || brand.logo) ? (
+                      {(brand.logo_cloudinary_url || brand.logo_url || brand.logo) ? (
                         <img
-                          src={brand.logo_url || brand.logo}
+                          src={brand.logo_cloudinary_url || brand.logo_url || brand.logo}
                           alt={brand.name}
                           className="w-full h-full object-contain"
                         />

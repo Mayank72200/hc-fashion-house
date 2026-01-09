@@ -107,7 +107,11 @@ class PlatformWithCategories(PlatformResponse):
 
 class BrandBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Brand name")
-    logo_url: Optional[str] = Field(None, description="Brand logo URL")
+    logo_cloudinary_url: Optional[str] = Field(None, description="Cloudinary logo URL")
+    logo_folder_path: Optional[str] = Field(None, description="Cloudinary folder path")
+    logo_public_id: Optional[str] = Field(None, description="Cloudinary public ID")
+    logo_width: Optional[int] = Field(None, description="Logo width")
+    logo_height: Optional[int] = Field(None, description="Logo height")
     is_active: bool = Field(True, description="Whether brand is active")
 
 
@@ -125,7 +129,11 @@ class BrandCreate(BrandBase):
 class BrandUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     slug: Optional[str] = Field(None, max_length=255)
-    logo_url: Optional[str] = None
+    logo_cloudinary_url: Optional[str] = None
+    logo_folder_path: Optional[str] = None
+    logo_public_id: Optional[str] = None
+    logo_width: Optional[int] = None
+    logo_height: Optional[int] = None
     is_active: Optional[bool] = None
 
 
