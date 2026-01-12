@@ -220,7 +220,7 @@ function ProductStockCard({ product, onStockUpdate, expanded, onToggle }) {
 
   // Get primary image from media array
   const primaryMedia = product.media?.find(m => m.is_primary) || product.media?.[0];
-  const thumbnailUrl = product.thumbnail_url || primaryMedia?.media_url || primaryMedia?.cloudinary_url;
+  const thumbnailUrl = product.thumbnail_url || extractMediaUrl(primaryMedia);
 
   // Check if product is non-LIVE
   const isNonLive = product.status && product.status !== 'live';

@@ -1,11 +1,10 @@
 """
 Media Upload Service
-Handles Cloudinary uploads and database operations for media assets
+Handles R2 (Cloudflare) uploads and database operations for media assets
 """
 from typing import Optional, List, Dict, Any
+import logging
 
-import cloudinary
-import cloudinary.uploader
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
 
@@ -17,18 +16,17 @@ from models.media_models import (
     ProductVariantMediaUpload, CatalogueBannerUpload,
     CategoryBannerUpload, GlobalMediaUpload, MediaUpdateRequest
 )
-from utils.cloudinary_config import (
-    configure_cloudinary,
-    generate_product_variant_folder,
-    generate_color_slug,
-    generate_catalogue_banner_folder,
-    generate_category_banner_folder,
-    generate_global_folder,
-    get_upload_options,
-    extract_media_info,
-    calculate_aspect_ratio,
+from utils.r2_config import (
+    r2_client,
+    generate_product_path,
+    generate_catalogue_banner_path,
+    generate_category_banner_path,
+    generate_brand_logo_path,
+    generate_global_media_path,
+    get_content_type,
     validate_file_type,
-    get_allowed_types
+    get_allowed_types,
+    extract_object_path_from_url
 )
 from utils.exceptions import (
     ResourceNotFoundException,
@@ -36,13 +34,15 @@ from utils.exceptions import (
     BusinessRuleException
 )
 
+logger = logging.getLogger(__name__)
+
 
 class MediaUploadService:
-    """Service for handling media uploads to Cloudinary and database operations"""
+    """Service for handling media uploads to R2 and database operations"""
 
     def __init__(self):
-        """Initialize the service and configure Cloudinary"""
-        configure_cloudinary()
+        """Initialize the service"""
+        pass
 
     # ========================
     # Validation Methods
@@ -69,19 +69,17 @@ class MediaUploadService:
         allowed_types = get_allowed_types(media_type)
         if not validate_file_type(file.filename, allowed_types):
             raise ValidationException(
-                message=f"Invalid file type. Allowed types for {media_type}: {', '.join(allowed_types)}",
+                message=f"Invalid file type. Allowed types: {', '.join(allowed_types)}",
                 field="file",
-                details={"allowed_types": allowed_types, "filename": file.filename}
+                details={"allowed_types": allowed_types}
             )
 
         # Check file size (max 10MB for images, 100MB for videos)
         max_size = 100 * 1024 * 1024 if media_type == "video" else 10 * 1024 * 1024
-        # Note: file.size might be None for streaming uploads
         if file.size and file.size > max_size:
             raise ValidationException(
-                message=f"File too large. Maximum size: {max_size // (1024*1024)}MB",
-                field="file",
-                details={"max_size_mb": max_size // (1024*1024), "file_size_mb": file.size // (1024*1024)}
+                message=f"File too large. Max size: {max_size / (1024 * 1024)}MB",
+                field="file"
             )
 
     @staticmethod
@@ -94,7 +92,7 @@ class MediaUploadService:
         """
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
-            raise ResourceNotFoundException("Product", product_id)
+            raise ResourceNotFoundException(resource="Product", resource_id=product_id)
 
         variant = db.query(ProductVariant).filter(
             ProductVariant.id == variant_id,
@@ -102,8 +100,9 @@ class MediaUploadService:
         ).first()
         if not variant:
             raise ResourceNotFoundException(
-                "ProductVariant", variant_id,
-                details={"message": f"Variant {variant_id} not found for product {product_id}"}
+                resource="ProductVariant",
+                resource_id=variant_id,
+                details={"product_id": product_id}
             )
 
         return product, variant
@@ -113,7 +112,7 @@ class MediaUploadService:
         """Validate that catalogue exists"""
         catalogue = db.query(Catalogue).filter(Catalogue.id == catalogue_id).first()
         if not catalogue:
-            raise ResourceNotFoundException("Catalogue", catalogue_id)
+            raise ResourceNotFoundException(resource="Catalogue", resource_id=catalogue_id)
         return catalogue
 
     @staticmethod
@@ -121,29 +120,27 @@ class MediaUploadService:
         """Validate that category exists"""
         category = db.query(Category).filter(Category.id == category_id).first()
         if not category:
-            raise ResourceNotFoundException("Category", category_id)
+            raise ResourceNotFoundException(resource="Category", resource_id=category_id)
         return category
 
     # ========================
     # Upload Methods
     # ========================
 
-    async def upload_to_cloudinary(
+    async def upload_to_r2(
         self,
         file: UploadFile,
-        folder_path: str,
-        resource_type: str = "image"
+        object_path: str
     ) -> Dict[str, Any]:
         """
-        Upload file to Cloudinary.
+        Upload file to R2.
 
         Args:
             file: The file to upload
-            folder_path: Target folder in Cloudinary
-            resource_type: 'image' or 'video'
+            object_path: Target path in R2 bucket
 
         Returns:
-            Cloudinary upload response
+            Upload result with public URL
 
         Raises:
             BusinessRuleException: If upload fails
@@ -152,28 +149,31 @@ class MediaUploadService:
             # Read file content
             content = await file.read()
 
-            # Get upload options
-            options = get_upload_options(folder_path, resource_type)
+            # Determine content type
+            content_type = get_content_type(file.filename)
 
-            # Upload to Cloudinary
-            result = cloudinary.uploader.upload(
-                content,
-                **options
+            # Upload to R2
+            public_url = r2_client.upload_file(
+                file_content=content,
+                object_path=object_path,
+                content_type=content_type
             )
 
-            return result
+            logger.info(f"Successfully uploaded to R2: {object_path}")
 
-        except cloudinary.exceptions.Error as e:
-            raise BusinessRuleException(
-                message=f"Cloudinary upload failed: {str(e)}",
-                rule="cloudinary_upload",
-                details={"folder": folder_path, "error": str(e)}
-            )
+            return {
+                "public_url": public_url,
+                "object_path": object_path,
+                "filename": file.filename,
+                "content_type": content_type
+            }
+
         except Exception as e:
+            logger.error(f"R2 upload failed for {object_path}: {str(e)}")
             raise BusinessRuleException(
                 message=f"Upload failed: {str(e)}",
-                rule="file_upload",
-                details={"error": str(e)}
+                rule="r2_upload",
+                details={"object_path": object_path, "error": str(e)}
             )
         finally:
             # Reset file position for potential retry
@@ -183,7 +183,7 @@ class MediaUploadService:
         self,
         db: Session,
         upload_result: Dict[str, Any],
-        folder_path: str,
+        object_path: str,
         media_type: str,
         usage_type: str,
         platform: str,
@@ -197,8 +197,8 @@ class MediaUploadService:
 
         Args:
             db: Database session
-            upload_result: Cloudinary upload response
-            folder_path: Folder path in Cloudinary
+            upload_result: R2 upload response
+            object_path: Path in R2 bucket
             media_type: 'image' or 'video'
             usage_type: 'catalogue', 'lifestyle', or 'banner'
             platform: Target platform
@@ -210,21 +210,18 @@ class MediaUploadService:
         Returns:
             Created MediaAsset
         """
-        info = extract_media_info(upload_result)
-        aspect_ratio = calculate_aspect_ratio(info.get("width"), info.get("height"))
-
         media_asset = MediaAsset(
             product_id=product_id,
             variant_id=variant_id,
             media_type=media_type,
             usage_type=usage_type,
             platform=platform,
-            cloudinary_url=info["cloudinary_url"],
-            folder_path=folder_path,
-            public_id=info["public_id"],
-            width=info.get("width"),
-            height=info.get("height"),
-            aspect_ratio=aspect_ratio,
+            cloudinary_url=upload_result["public_url"],  # Keep field name for now (will migrate later)
+            folder_path=object_path,  # Store R2 object path
+            public_id=object_path,  # Use object path as public_id
+            width=None,  # Will add image processing later
+            height=None,
+            aspect_ratio=None,
             display_order=display_order,
             is_primary=is_primary,
             status="approved"
@@ -286,18 +283,18 @@ class MediaUploadService:
         # Get brand information (may be None)
         brand = product.brand
         brand_slug = brand.slug if brand else "no-brand"
-        
-        # Generate folder path: ecommerce/products/{platform_slug}/{brand_slug}/{catalogue_slug}/{product_slug}/{usage_type}/
-        folder_path = generate_product_variant_folder(
+
+        # Generate deterministic object path
+        object_path = generate_product_path(
             platform_slug=platform.slug,
             brand_slug=brand_slug,
             catalogue_slug=catalogue.slug,
             product_slug=product.slug,
-            usage_type=upload_data.usage_type.value
+            usage_type=upload_data.usage_type.value,
+            filename=file.filename
         )
 
-        # If setting as primary, unset other primary images for this PRODUCT (not variant)
-        # All variants of the same product/color share images
+        # If setting as primary, unset other primary images for this PRODUCT
         if upload_data.is_primary:
             self._unset_primary_media(
                 db,
@@ -305,15 +302,14 @@ class MediaUploadService:
                 usage_type=upload_data.usage_type.value
             )
 
-        # Upload to Cloudinary
-        upload_result = await self.upload_to_cloudinary(file, folder_path, "image")
+        # Upload to R2
+        upload_result = await self.upload_to_r2(file, object_path)
 
         # Create database record
-        # Note: We still store variant_id for backward compatibility, but images are product-level
         media_asset = self.create_media_asset(
             db=db,
             upload_result=upload_result,
-            folder_path=folder_path,
+            object_path=object_path,
             media_type=MediaType.IMAGE.value,
             usage_type=upload_data.usage_type.value,
             platform=upload_data.platform.value,
@@ -352,21 +348,24 @@ class MediaUploadService:
         # Validate catalogue
         catalogue = self.validate_catalogue(db, upload_data.catalogue_id)
 
-        # Generate folder path
-        folder_path = generate_catalogue_banner_folder(catalogue.slug)
+        # Generate object path
+        object_path = generate_catalogue_banner_path(
+            catalogue_slug=catalogue.slug,
+            filename=file.filename
+        )
 
         # If setting as primary, unset other primary banners
         if upload_data.is_primary:
             self._unset_catalogue_primary_banner(db, upload_data.catalogue_id)
 
-        # Upload to Cloudinary
-        upload_result = await self.upload_to_cloudinary(file, folder_path, "image")
+        # Upload to R2
+        upload_result = await self.upload_to_r2(file, object_path)
 
         # Create database record
         media_asset = self.create_media_asset(
             db=db,
             upload_result=upload_result,
-            folder_path=folder_path,
+            object_path=object_path,
             media_type=MediaType.IMAGE.value,
             usage_type=UsageType.BANNER.value,
             platform=upload_data.platform.value,
@@ -410,17 +409,20 @@ class MediaUploadService:
         # Validate category
         category = self.validate_category(db, upload_data.category_id)
 
-        # Generate folder path
-        folder_path = generate_category_banner_folder(category.slug)
+        # Generate object path
+        object_path = generate_category_banner_path(
+            category_slug=category.slug,
+            filename=file.filename
+        )
 
-        # Upload to Cloudinary
-        upload_result = await self.upload_to_cloudinary(file, folder_path, "image")
+        # Upload to R2
+        upload_result = await self.upload_to_r2(file, object_path)
 
         # Create database record
         media_asset = self.create_media_asset(
             db=db,
             upload_result=upload_result,
-            folder_path=folder_path,
+            object_path=object_path,
             media_type=MediaType.IMAGE.value,
             usage_type=UsageType.BANNER.value,
             platform=upload_data.platform.value,
@@ -456,22 +458,22 @@ class MediaUploadService:
         # Validate file
         self.validate_file(file, upload_data.media_type.value)
 
-        # Generate folder path
-        folder_path = generate_global_folder(upload_data.folder_type)
+        # Generate object path
+        object_path = generate_global_media_path(
+            folder_type=upload_data.folder_type,
+            filename=file.filename
+        )
 
-        # Determine resource type
-        resource_type = "video" if upload_data.media_type == MediaType.VIDEO else "image"
-
-        # Upload to Cloudinary
-        upload_result = await self.upload_to_cloudinary(file, folder_path, resource_type)
+        # Upload to R2
+        upload_result = await self.upload_to_r2(file, object_path)
 
         # Create database record
         media_asset = self.create_media_asset(
             db=db,
             upload_result=upload_result,
-            folder_path=folder_path,
+            object_path=object_path,
             media_type=upload_data.media_type.value,
-            usage_type=UsageType.BANNER.value,  # Global media uses banner type
+            usage_type=UsageType.BANNER.value,  # Global media uses banner usage type
             platform=upload_data.platform.value,
             display_order=upload_data.display_order,
             is_primary=False,
@@ -490,7 +492,7 @@ class MediaUploadService:
         """Get media asset by ID"""
         media = db.query(MediaAsset).filter(MediaAsset.id == media_id).first()
         if not media:
-            raise ResourceNotFoundException("MediaAsset", media_id)
+            raise ResourceNotFoundException(resource="MediaAsset", resource_id=media_id)
         return media
 
     @staticmethod
@@ -499,13 +501,11 @@ class MediaUploadService:
         product_id: int,
         usage_type: Optional[str] = None
     ) -> List[MediaAsset]:
-        """List all media for a product, ordered by display_order"""
+        """List all media for a product"""
         query = db.query(MediaAsset).filter(MediaAsset.product_id == product_id)
-
         if usage_type:
             query = query.filter(MediaAsset.usage_type == usage_type)
-
-        return query.order_by(MediaAsset.display_order.asc()).all()
+        return query.order_by(MediaAsset.display_order).all()
 
     @staticmethod
     def list_variant_media(
@@ -513,26 +513,19 @@ class MediaUploadService:
         variant_id: int,
         usage_type: Optional[str] = None
     ) -> List[MediaAsset]:
-        """List all media for a variant, ordered by display_order"""
+        """List all media for a variant"""
         query = db.query(MediaAsset).filter(MediaAsset.variant_id == variant_id)
-
         if usage_type:
             query = query.filter(MediaAsset.usage_type == usage_type)
-
-        return query.order_by(MediaAsset.display_order.asc()).all()
+        return query.order_by(MediaAsset.display_order).all()
 
     @staticmethod
     def list_catalogue_banners(db: Session, catalogue_id: int) -> List[MediaAsset]:
-        """List all banners for a catalogue"""
-        catalogue = db.query(Catalogue).filter(Catalogue.id == catalogue_id).first()
-        if not catalogue:
-            raise ResourceNotFoundException("Catalogue", catalogue_id)
-
-        folder_path = generate_catalogue_banner_folder(catalogue.slug)
+        """List catalogue banners"""
+        # Catalogue banners don't have product_id, filter by usage_type
         return db.query(MediaAsset).filter(
-            MediaAsset.folder_path == folder_path,
             MediaAsset.usage_type == UsageType.BANNER.value
-        ).order_by(MediaAsset.display_order.asc()).all()
+        ).order_by(MediaAsset.display_order).all()
 
     # ========================
     # Update Methods
@@ -559,13 +552,8 @@ class MediaUploadService:
 
         # Apply updates
         for key, value in update_dict.items():
-            if value is not None:
-                if key == 'status':
-                    setattr(media, key, value.value if hasattr(value, 'value') else value)
-                elif key == 'platform':
-                    setattr(media, key, value.value if hasattr(value, 'value') else value)
-                else:
-                    setattr(media, key, value)
+            if hasattr(media, key):
+                setattr(media, key, value)
 
         db.commit()
         db.refresh(media)
@@ -583,8 +571,7 @@ class MediaUploadService:
         if media.variant_id != variant_id:
             raise BusinessRuleException(
                 message="Media does not belong to this variant",
-                rule="media_ownership",
-                details={"media_id": media_id, "variant_id": variant_id}
+                rule="variant_mismatch"
             )
 
         # Unset other primary
@@ -606,10 +593,9 @@ class MediaUploadService:
         updated = []
 
         for item in media_orders:
-            media = db.query(MediaAsset).filter(MediaAsset.id == item['media_id']).first()
-            if media:
-                media.display_order = item['display_order']
-                updated.append(media)
+            media = self.get_media_by_id(db, item['media_id'])
+            media.display_order = item['display_order']
+            updated.append(media)
 
         db.commit()
 
@@ -624,7 +610,7 @@ class MediaUploadService:
 
     def delete_media(self, db: Session, media_id: int) -> Dict[str, Any]:
         """
-        Delete media from Cloudinary and database.
+        Delete media from R2 and database.
 
         Args:
             db: Database session
@@ -635,24 +621,21 @@ class MediaUploadService:
         """
         media = self.get_media_by_id(db, media_id)
 
-        cloudinary_deleted = False
+        r2_deleted = False
 
-        # Try to delete from Cloudinary
-        if media.public_id:
+        # Try to delete from R2
+        if media.public_id:  # public_id contains the object path
             try:
-                resource_type = "video" if media.media_type == "video" else "image"
-                cloudinary.uploader.destroy(media.public_id, resource_type=resource_type)
-                cloudinary_deleted = True
+                r2_deleted = r2_client.delete_file(media.public_id)
             except Exception as e:
-                # Log but don't fail - still delete from DB
-                print(f"Warning: Could not delete from Cloudinary: {e}")
+                logger.error(f"Failed to delete from R2: {str(e)}")
 
         # If this was a catalogue banner, update catalogue
         if media.usage_type == UsageType.BANNER.value and media.is_primary:
-            catalogue = db.query(Catalogue).filter(
+            catalogues = db.query(Catalogue).filter(
                 Catalogue.banner_media_id == media_id
-            ).first()
-            if catalogue:
+            ).all()
+            for catalogue in catalogues:
                 catalogue.banner_media_id = None
 
         # Delete from database
@@ -663,7 +646,7 @@ class MediaUploadService:
             "success": True,
             "message": "Media deleted successfully",
             "deleted_id": media_id,
-            "cloudinary_deleted": cloudinary_deleted
+            "r2_deleted": r2_deleted
         }
 
     # ========================
@@ -694,11 +677,7 @@ class MediaUploadService:
         """Unset primary for catalogue banners"""
         catalogue = db.query(Catalogue).filter(Catalogue.id == catalogue_id).first()
         if catalogue:
-            folder_path = generate_catalogue_banner_folder(catalogue.slug)
-            db.query(MediaAsset).filter(
-                MediaAsset.folder_path == folder_path,
-                MediaAsset.is_primary == True
-            ).update({"is_primary": False})
+            catalogue.banner_media_id = None
             db.flush()
 
     # ========================
@@ -706,22 +685,14 @@ class MediaUploadService:
     # ========================
 
     @staticmethod
-    def check_cloudinary_connection() -> Dict[str, Any]:
-        """Check if Cloudinary connection is working"""
+    def check_r2_connection() -> Dict[str, Any]:
+        """Check R2 connection health"""
         try:
-            result = cloudinary.api.ping()
-            return {
-                "status": "healthy",
-                "cloud_name": cloudinary.config().cloud_name,
-                "connected": True,
-                "message": "Cloudinary connection successful"
-            }
+            return r2_client.check_connection()
         except Exception as e:
             return {
-                "status": "unhealthy",
-                "cloud_name": cloudinary.config().cloud_name,
                 "connected": False,
-                "message": str(e)
+                "error": str(e)
             }
 
     # ========================
@@ -753,31 +724,23 @@ class MediaUploadService:
         # Validate file
         self.validate_file(file, media.media_type)
 
-        # Delete old file from Cloudinary
+        # Delete old file from R2
         if media.public_id:
             try:
-                resource_type = "video" if media.media_type == "video" else "image"
-                cloudinary.uploader.destroy(media.public_id, resource_type=resource_type)
+                r2_client.delete_file(media.public_id)
             except Exception as e:
-                print(f"Warning: Could not delete old media from Cloudinary: {e}")
+                logger.warning(f"Failed to delete old file from R2: {str(e)}")
 
-        # Upload new file to the same folder
-        upload_result = await self.upload_to_cloudinary(
-            file,
-            media.folder_path,
-            media.media_type
-        )
+        # Use the same object path (or generate new one with same structure)
+        object_path = media.public_id
 
-        # Extract new media info
-        info = extract_media_info(upload_result)
-        aspect_ratio = calculate_aspect_ratio(info.get("width"), info.get("height"))
+        # Upload new file
+        upload_result = await self.upload_to_r2(file, object_path)
 
         # Update media record
-        media.cloudinary_url = info["cloudinary_url"]
-        media.public_id = info["public_id"]
-        media.width = info.get("width")
-        media.height = info.get("height")
-        media.aspect_ratio = aspect_ratio
+        media.cloudinary_url = upload_result["public_url"]
+        media.public_id = object_path
+        media.folder_path = object_path
 
         db.commit()
         db.refresh(media)

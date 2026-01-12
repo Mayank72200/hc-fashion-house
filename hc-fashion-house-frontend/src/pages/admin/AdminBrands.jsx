@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AdminBrandAPI } from '@/lib/adminApi';
+import { extractMediaUrl } from '@/utils/imageUtils';
 import {
   Plus,
   Edit,
@@ -51,10 +52,10 @@ function BrandModal({ isOpen, onClose, brand, onSave }) {
       setFormData({
         name: brand.name || '',
         slug: brand.slug || '',
-        logo: brand.logo_cloudinary_url || brand.logo_url || brand.logo || '',
+        logo: extractMediaUrl(brand.logo_cloudinary_url || brand.logo_url || brand.logo) || '',
         is_active: brand.is_active !== false,
       });
-      setLogoPreview(brand.logo_cloudinary_url || brand.logo_url || brand.logo || null);
+      setLogoPreview(extractMediaUrl(brand.logo_cloudinary_url || brand.logo_url || brand.logo) || null);
     } else {
       setFormData({
         name: '',

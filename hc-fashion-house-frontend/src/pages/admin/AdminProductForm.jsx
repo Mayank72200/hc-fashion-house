@@ -1247,14 +1247,10 @@ function ProductTab({
               id={`short-description-${index}`}
               value={product.shortDescription}
               onChange={(e) => onUpdate({ ...product, shortDescription: e.target.value })}
-              placeholder="Enter a brief product description (max 200 characters)..."
+              placeholder="Enter a brief product description..."
               rows={2}
               className="resize-none"
-              maxLength={200}
             />
-            <p className="text-xs text-muted-foreground">
-              {product.shortDescription.length}/200 characters
-            </p>
           </div>
 
           {/* Long Description */}
@@ -1481,6 +1477,24 @@ export default function AdminProductForm() {
   const { toast } = useToast();
   const isEditing = Boolean(id);
 
+  // ========================
+  // Helper Functions
+  // ========================
+
+  // Extract media URL from various formats
+  const extractMediaUrl = (mediaData) => {
+    if (typeof mediaData === 'string') {
+      return mediaData;
+    }
+    if (mediaData?.media_url) {
+      return mediaData.media_url;
+    }
+    if (mediaData?.cloudinary_url) {
+      return mediaData.cloudinary_url;
+    }
+    return '';
+  };
+
   // API-fetched data states
   const [platforms, setPlatforms] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -1526,6 +1540,23 @@ export default function AdminProductForm() {
       try {
         const products = await AdminAPI.getCatalogueProducts(catalogueData.articleId);
         setExistingProducts(products || []);
+        
+        // Extract common tags from existing products and pre-fill for new products
+        if (products && products.length > 0) {
+          const allTags = products.flatMap(p => p.tags || []);
+          const uniqueTags = [...new Set(allTags)];
+          
+          // Pre-fill tags for all current products if they don't have tags yet
+          setProducts(prevProducts => 
+            prevProducts.map(product => {
+              // Only pre-fill if product has no tags set
+              if (!product.tags || product.tags.length === 0) {
+                return { ...product, tags: uniqueTags };
+              }
+              return product;
+            })
+          );
+        }
       } catch (error) {
         console.error('Failed to fetch existing products:', error);
         setExistingProducts([]);
@@ -1633,24 +1664,38 @@ export default function AdminProductForm() {
         }
 
         console.log('Loaded product for edit:', product);
+        console.log('Product category_ids:', product.category_ids);
 
         // Get platform from platform_slug
         const platformSlug = product.platform_slug || 'footwear';
         const platform = platforms.find(p => p.slug === platformSlug);
         
-        // Fetch catalogue to get category info
+        // Fetch categories for the platform BEFORE setting categoryIds
+        let categoriesForPlatform = [];
+        if (platform?.id) {
+          try {
+            categoriesForPlatform = await AdminAPI.getCategories({
+              platformId: platform.id,
+              isActive: true,
+            });
+            console.log('Fetched categories for platform:', categoriesForPlatform);
+            setCategories(categoriesForPlatform || []);
+          } catch (err) {
+            console.error('Failed to fetch categories:', err);
+          }
+        }
+        
+        // Fetch catalogue to get additional info
         let catalogue = null;
-        let categoryId = null;
         if (product.catalogue_id) {
           try {
             catalogue = await AdminAPI.getCatalogueById(product.catalogue_id);
-            categoryId = catalogue?.category_id;
           } catch (err) {
             console.error('Failed to fetch catalogue:', err);
           }
         }
 
-        // Set catalogue data with proper platform
+        // Set catalogue data with proper platform and category_ids
         setCatalogueData({
           article: product.catalogue_name || catalogue?.name || product.name || '',
           articleId: product.catalogue_id || null,
@@ -1658,7 +1703,7 @@ export default function AdminProductForm() {
           platformId: platform?.id || null,
           platformSlug: platformSlug,
           gender: product.gender || catalogue?.gender || 'men',
-          categoryIds: categoryId ? [categoryId] : [],
+          categoryIds: product.category_ids || [],
         });
 
         // Build size variants from product variants
@@ -1699,7 +1744,7 @@ export default function AdminProductForm() {
             images.push({
               id: media.id || Date.now() + index,
               mediaId: media.id, // Keep track of existing media ID
-              preview: media.media_url || media.cloudinary_url,
+              preview: extractMediaUrl(media.media_url || media.cloudinary_url || media),
               isPrimary: media.is_primary || index === 0,
               isExisting: true, // Flag to indicate this is an existing image
               displayOrder: media.display_order || index,
@@ -1717,7 +1762,28 @@ export default function AdminProductForm() {
           colorHex: product.color_hex || '',
           name: product.name || '',
           slug: product.slug || '',
-          sku: product.variants?.[0]?.sku?.replace(/-\d+$/, '') || '', // Remove size suffix
+          sku: (() => {
+            // Extract base SKU by removing last 2 segments (color-size)
+            // Format: YOSTAR-HR-416-WHITE-7 -> YOSTAR-HR-416
+            const fullSku = product.variants?.[0]?.sku || '';
+            console.log('Full SKU from variant:', fullSku);
+            
+            if (!fullSku) return '';
+            
+            const parts = fullSku.split('-');
+            console.log('SKU parts:', parts);
+            console.log('Parts length:', parts.length);
+            
+            // Always remove last 2 parts (color and size)
+            if (parts.length > 2) {
+              const baseSku = parts.slice(0, -2).join('-');
+              console.log('Extracted base SKU:', baseSku);
+              return baseSku;
+            }
+            
+            console.log('SKU too short, returning as-is:', fullSku);
+            return fullSku;
+          })(),
           brandId: product.brand_id || product.brand?.id || null,
           brandName: product.brand?.name || product.brand_name || '',
           selectedSizes,
@@ -1725,8 +1791,22 @@ export default function AdminProductForm() {
           description: product.long_description || product.short_description || '',
           shortDescription: product.short_description || '',
           longDescription: product.long_description || '',
-          specifications: '', // Not stored separately currently
-          tags: product.tags || [],
+          specifications: product.specifications || '', // Load from separate specifications field
+          tags: (() => {
+            // Normalize tags from backend (lowercase-with-dashes) to display format (Title Case)
+            const backendTags = Array.isArray(product.tags) 
+              ? product.tags 
+              : (product.tags ? product.tags.split(',').map(t => t.trim()) : []);
+            
+            // Convert backend tags to match TAG_OPTIONS format
+            return backendTags.map(tag => {
+              // Find matching tag in TAG_OPTIONS (case-insensitive, dash-insensitive)
+              const matchingTag = TAG_OPTIONS.find(opt => 
+                opt.toLowerCase().replace(/[\s-]+/g, '') === tag.toLowerCase().replace(/[\s-]+/g, '')
+              );
+              return matchingTag || tag;
+            });
+          })(),
           images,
           footwearDetails: {
             upperMaterial: footwearDetails.upper_material || '',
@@ -1741,6 +1821,15 @@ export default function AdminProductForm() {
 
         setProducts([editProduct]);
         setActiveProductTab('product-0');
+
+        // Populate catalogue data with category_ids
+        setCatalogueData({
+          article: product.catalogue_name || '',
+          articleId: product.catalogue_id || null,
+          gender: product.gender || 'unisex',
+          platformId: null, // Will be set when platforms load
+          categoryIds: product.category_ids || [],
+        });
 
         toast({
           title: 'Product Loaded',
@@ -1856,13 +1945,23 @@ export default function AdminProductForm() {
         article: '',
       }));
     } else if (field === 'articleId') {
-      // When selecting an existing catalogue
+      // When selecting an existing catalogue, load its category
       const catalogue = catalogues.find(c => c.id === value);
-      setCatalogueData(prev => ({
-        ...prev,
-        articleId: value,
-        article: catalogue?.name || '',
-      }));
+      if (catalogue) {
+        setCatalogueData(prev => ({
+          ...prev,
+          articleId: value,
+          article: catalogue.name || '',
+          // Pre-fill the category from the selected catalogue
+          categoryIds: catalogue.category_id ? [catalogue.category_id] : prev.categoryIds,
+        }));
+      } else {
+        setCatalogueData(prev => ({
+          ...prev,
+          articleId: value,
+          article: '',
+        }));
+      }
     } else {
       setCatalogueData(prev => ({ ...prev, [field]: value }));
     }
@@ -1991,12 +2090,14 @@ export default function AdminProductForm() {
           name: product.name,
           slug: product.slug || null,
           brand_id: product.brandId ? parseInt(product.brandId) : null,
+          category_ids: catalogueData.categoryIds.map(id => parseInt(id)),  // Multiple categories
           color: product.color || null,
           color_hex: product.colorHex || null,
           mrp: mrpValue,
           price: priceValue,
           short_description: product.shortDescription || null,
           long_description: product.longDescription || null,
+          specifications: product.specifications || null,
           tags: product.tags.map(t => t.toLowerCase().replace(/\s+/g, '-')),
         };
 
@@ -2100,6 +2201,7 @@ export default function AdminProductForm() {
 
       // CREATE MODE: Original create logic
       let catalogueId = catalogueData.articleId;
+      let newCatalogueId = null; // Track if we create a new catalogue for rollback
 
       // Create catalogue if new
       if (!catalogueId && catalogueData.article) {
@@ -2111,6 +2213,7 @@ export default function AdminProductForm() {
           is_active: true,
         });
         catalogueId = newCatalogue.id;
+        newCatalogueId = newCatalogue.id; // Track the newly created catalogue
       }
 
       if (!catalogueId) {
@@ -2119,120 +2222,138 @@ export default function AdminProductForm() {
 
       // Create products
       const createdProducts = [];
-      for (const product of products) {
-        // Get base price from first variant (prices stored in rupees)
-        const firstSize = product.selectedSizes[0];
-        const sellingPrice = parseInt(product.sizeVariants[firstSize]?.price || 0);
-        const mrpPrice = parseInt(product.sizeVariants[firstSize]?.mrp || 0);
-        
-        // mrp = the main price (MRP)
-        // price = discounted selling price (only if selling price < MRP)
-        const mrpValue = mrpPrice > 0 ? mrpPrice : sellingPrice;
-        const priceValue = (mrpPrice > 0 && sellingPrice < mrpPrice) ? sellingPrice : null;
-
-        // Build variants array
-        const variants = product.selectedSizes.map(size => {
-          const variant = product.sizeVariants[size];
-          // Generate proper SKU - ensure no empty parts or special chars
-          const baseSku = product.sku || generateSKU(catalogueData.article, product.color, '');
-          // Format color for SKU: "White/Grey" -> "WHITE-GREY"
-          const colorPart = product.color?.replace(/[^a-zA-Z0-9]/g, '-')?.replace(/-+/g, '-')?.replace(/^-|-$/g, '')?.toUpperCase() || '';
-          const variantSku = variant.skuId || (colorPart ? `${baseSku}-${colorPart}-${String(size).toUpperCase()}` : `${baseSku}-${String(size).toUpperCase()}`);
-          return {
-            size: size,
-            sku: variantSku.replace(/[^A-Z0-9-]/gi, '').toUpperCase(),
-            stock_quantity: parseInt(variant.inventory || 0),
-            price_override: parseInt(variant.price || 0),
-            mrp_override: parseInt(variant.mrp || 0),
-            is_active: true,
-          };
-        });
-
-        // Build product payload
-        const productPayload = {
-          name: product.name,
-          slug: product.slug || null,  // Include the custom slug if provided
-          catalogue_id: parseInt(catalogueId),
-          brand_id: product.brandId ? parseInt(product.brandId) : null,
-          color: product.color || null,
-          color_hex: product.colorHex || null,
-          mrp: mrpValue,
-          price: priceValue,
-          short_description: product.shortDescription || null,
-          long_description: product.longDescription || null,
-          is_featured: false,
-          tags: product.tags.map(t => t.toLowerCase().replace(/\s+/g, '-')),
-          status: 'draft',
-          is_active: true,
-          variants: variants,
-        };
-
-        // Add footwear details if present
-        if (product.footwearDetails) {
-          const fd = product.footwearDetails;
-          if (fd.upperMaterial || fd.soleMaterial || fd.closureType) {
-            productPayload.footwear_details = {
-              upper_material: fd.upperMaterial || null,
-              sole_material: fd.soleMaterial || null,
-              closure_type: fd.closureType || null,
-              toe_shape: fd.toeShape || null,
-              heel_height_mm: fd.heelHeightMm ? parseInt(fd.heelHeightMm) : null,
-              weight_grams: fd.weightGrams ? parseInt(fd.weightGrams) : null,
-              size_chart_type: fd.sizeChartType || null,
-            };
-          }
-        }
-
-        console.log('Creating product:', productPayload);
-        const createdProduct = await AdminAPI.createProduct(productPayload);
-
-        // Upload images ONLY if provided - if any upload fails, rollback entire product
-        if (product.images && product.images.length > 0) {
-          const firstVariantId = createdProduct.variants?.[0]?.id;
+      try {
+        for (const product of products) {
+          // Get base price from first variant (prices stored in rupees)
+          const firstSize = product.selectedSizes[0];
+          const sellingPrice = parseInt(product.sizeVariants[firstSize]?.price || 0);
+          const mrpPrice = parseInt(product.sizeVariants[firstSize]?.mrp || 0);
           
-          if (!firstVariantId) {
-            // No variant created - rollback product
-            console.error('No variant ID available for image upload, rolling back...');
-            await AdminAPI.deleteProduct(createdProduct.id);
-            throw new Error('Product creation failed: No variant was created for image upload.');
-          }
+          // mrp = the main price (MRP)
+          // price = discounted selling price (only if selling price < MRP)
+          const mrpValue = mrpPrice > 0 ? mrpPrice : sellingPrice;
+          const priceValue = (mrpPrice > 0 && sellingPrice < mrpPrice) ? sellingPrice : null;
 
-          // Upload each image - if ANY fails, rollback everything
-          for (let i = 0; i < product.images.length; i++) {
-            const image = product.images[i];
-            try {
-              await AdminAPI.uploadProductMedia(
-                createdProduct.id,
-                firstVariantId,
-                image.file,
-                {
-                  usageType: 'catalogue',
-                  platform: 'website',
-                  displayOrder: i,
-                  isPrimary: image.isPrimary || i === 0,
-                }
-              );
-            } catch (uploadError) {
-              // Image upload failed - rollback by deleting the product
-              console.error(`Failed to upload image ${i + 1}:`, uploadError);
-              try {
-                await AdminAPI.deleteProduct(createdProduct.id);
-              } catch (deleteError) {
-                console.error('Failed to rollback product:', deleteError);
-              }
-              throw new Error(
-                `Failed to upload image "${image.fileName || `Image ${i + 1}`}". ` +
-                `Product creation rolled back. Error: ${uploadError.message}`
-              );
+          // Build variants array
+          const variants = product.selectedSizes.map(size => {
+            const variant = product.sizeVariants[size];
+            // Generate proper SKU - ensure no empty parts or special chars
+            const baseSku = product.sku || generateSKU(catalogueData.article, product.color, '');
+            // Format color for SKU: "White/Grey" -> "WHITE-GREY"
+            const colorPart = product.color?.replace(/[^a-zA-Z0-9]/g, '-')?.replace(/-+/g, '-')?.replace(/^-|-$/g, '')?.toUpperCase() || '';
+            const variantSku = variant.skuId || (colorPart ? `${baseSku}-${colorPart}-${String(size).toUpperCase()}` : `${baseSku}-${String(size).toUpperCase()}`);
+            return {
+              size: size,
+              sku: variantSku.replace(/[^A-Z0-9-]/gi, '').toUpperCase(),
+              stock_quantity: parseInt(variant.inventory || 0),
+              price_override: parseInt(variant.price || 0),
+              mrp_override: parseInt(variant.mrp || 0),
+              is_active: true,
+            };
+          });
+
+          // Build product payload
+          const productPayload = {
+            name: product.name,
+            slug: product.slug || null,  // Include the custom slug if provided
+            catalogue_id: parseInt(catalogueId),
+            brand_id: product.brandId ? parseInt(product.brandId) : null,
+            category_ids: catalogueData.categoryIds.map(id => parseInt(id)),  // Multiple categories
+            color: product.color || null,
+            color_hex: product.colorHex || null,
+            mrp: mrpValue,
+            price: priceValue,
+            short_description: product.shortDescription || null,
+            long_description: product.longDescription || null,
+            specifications: product.specifications || null,
+            is_featured: false,
+            tags: product.tags.map(t => t.toLowerCase().replace(/\s+/g, '-')),
+            status: 'draft',
+            is_active: true,
+            variants: variants,
+          };
+
+          // Add footwear details if present
+          if (product.footwearDetails) {
+            const fd = product.footwearDetails;
+            if (fd.upperMaterial || fd.soleMaterial || fd.closureType) {
+              productPayload.footwear_details = {
+                upper_material: fd.upperMaterial || null,
+                sole_material: fd.soleMaterial || null,
+                closure_type: fd.closureType || null,
+                toe_shape: fd.toeShape || null,
+                heel_height_mm: fd.heelHeightMm ? parseInt(fd.heelHeightMm) : null,
+                weight_grams: fd.weightGrams ? parseInt(fd.weightGrams) : null,
+                size_chart_type: fd.sizeChartType || null,
+              };
             }
           }
-          
-          console.log(`Successfully uploaded all ${product.images.length} images for product ${createdProduct.id}`);
-        }
-        // If no images provided, product is created successfully without images
-        // User can upload images later by editing the product
 
-        createdProducts.push(createdProduct);
+          console.log('Creating product:', productPayload);
+          const createdProduct = await AdminAPI.createProduct(productPayload);
+
+          // Upload images ONLY if provided - if any upload fails, rollback entire product
+          if (product.images && product.images.length > 0) {
+            const firstVariantId = createdProduct.variants?.[0]?.id;
+            
+            if (!firstVariantId) {
+              // No variant created - rollback product
+              console.error('No variant ID available for image upload, rolling back...');
+              await AdminAPI.deleteProduct(createdProduct.id);
+              throw new Error('Product creation failed: No variant was created for image upload.');
+            }
+
+            // Upload each image - if ANY fails, rollback everything
+            for (let i = 0; i < product.images.length; i++) {
+              const image = product.images[i];
+              try {
+                await AdminAPI.uploadProductMedia(
+                  createdProduct.id,
+                  firstVariantId,
+                  image.file,
+                  {
+                    usageType: 'catalogue',
+                    platform: 'website',
+                    displayOrder: i,
+                    isPrimary: image.isPrimary || i === 0,
+                  }
+                );
+              } catch (uploadError) {
+                // Image upload failed - rollback by deleting the product
+                console.error(`Failed to upload image ${i + 1}:`, uploadError);
+                try {
+                  await AdminAPI.deleteProduct(createdProduct.id);
+                } catch (deleteError) {
+                  console.error('Failed to rollback product:', deleteError);
+                }
+                throw new Error(
+                  `Failed to upload image "${image.fileName || `Image ${i + 1}`}". ` +
+                  `Product creation rolled back. Error: ${uploadError.message}`
+                );
+              }
+            }
+            
+            console.log(`Successfully uploaded all ${product.images.length} images for product ${createdProduct.id}`);
+          }
+          // If no images provided, product is created successfully without images
+          // User can upload images later by editing the product
+
+          createdProducts.push(createdProduct);
+        }
+      } catch (productCreationError) {
+        // If we created a new catalogue and ANY product creation failed, delete the catalogue
+        // This cascade deletes all products created so far
+        if (newCatalogueId) {
+          console.error('Product creation failed, rolling back newly created catalogue...');
+          try {
+            await AdminAPI.deleteCatalogue(newCatalogueId);
+            console.log('Successfully rolled back catalogue and all products');
+          } catch (catalogueDeleteError) {
+            console.error('Failed to rollback catalogue:', catalogueDeleteError);
+          }
+        }
+        // Re-throw the original error
+        throw productCreationError;
       }
 
       toast({
@@ -2415,12 +2536,16 @@ export default function AdminProductForm() {
                           variant="outline"
                           role="combobox"
                           className="w-full justify-between h-auto min-h-[42px] py-2"
-                          disabled={!catalogueData.platformId || isEditing}
+                          disabled={!catalogueData.platformId}
                         >
                           <span className="flex flex-wrap gap-1 text-left">
                             {catalogueData.categoryIds.length === 0 ? (
                               <span className="text-muted-foreground">
                                 {catalogueData.platformId ? 'Select categories...' : 'Select platform first'}
+                              </span>
+                            ) : categories.length === 0 ? (
+                              <span className="text-muted-foreground">
+                                Loading categories...
                               </span>
                             ) : (
                               catalogueData.categoryIds.map(catId => {
@@ -2430,7 +2555,7 @@ export default function AdminProductForm() {
                                     key={catId}
                                     className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-sm"
                                   >
-                                    {cat?.name || catId}
+                                    {cat?.name || `Category ID: ${catId}`}
                                   </span>
                                 );
                               })

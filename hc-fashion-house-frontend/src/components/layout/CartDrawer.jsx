@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
 import { useCart } from '@/contexts/CartContext';
 import { Link } from 'react-router-dom';
+import { getImageProps } from '@/utils/imageUtils';
 
 export default function CartDrawer() {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, subtotal, itemCount, getStockForVariant } = useCart();

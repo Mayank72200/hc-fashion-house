@@ -1,7 +1,7 @@
 """
 Media Upload Router
-API endpoints for Cloudinary media upload and management
-All uploads are handled through backend - frontend never uploads directly to Cloudinary
+API endpoints for R2 (Cloudflare) media upload and management
+All uploads are handled through backend - frontend never uploads directly to R2
 """
 from typing import Optional, List
 from fastapi import APIRouter, Depends, File, UploadFile, Form, Query, status, HTTPException
@@ -60,13 +60,13 @@ def handle_exception(e: Exception) -> JSONResponse:
 @router.get(
     "/health",
     response_model=CloudinaryHealthResponse,
-    summary="Check Cloudinary Connection",
-    description="Verify that Cloudinary is properly configured and accessible"
+    summary="Check R2 Storage Connection",
+    description="Verify that R2 storage is properly configured and accessible"
 )
-async def check_cloudinary_health():
-    """Check Cloudinary connection status"""
-    result = media_service.check_cloudinary_connection()
-    status_code = 200 if result["connected"] else 503
+async def check_r2_health():
+    """Check R2 connection status"""
+    result = media_service.check_r2_connection()
+    status_code = 200 if result.get("connected", False) else 503
     return JSONResponse(status_code=status_code, content=result)
 
 

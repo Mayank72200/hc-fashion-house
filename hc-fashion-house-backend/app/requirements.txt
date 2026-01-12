@@ -10,7 +10,8 @@ python-multipart
 sqlalchemy
 
 # Media Storage
-cloudinary
+boto3
+botocore
 
 # Authentication (Supabase)
 supabase

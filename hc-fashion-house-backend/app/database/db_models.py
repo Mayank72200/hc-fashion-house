@@ -12,10 +12,24 @@ Key Concepts:
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime,
-    ForeignKey, UniqueConstraint
+    ForeignKey, UniqueConstraint, Table
 )
 from sqlalchemy.orm import relationship
 from database.connection import Base
+
+
+# ========================
+# Association Tables
+# ========================
+
+# Many-to-many relationship between products and categories
+product_categories = Table(
+    'product_categories',
+    Base.metadata,
+    Column('product_id', Integer, ForeignKey('products.id', ondelete='CASCADE'), primary_key=True),
+    Column('category_id', Integer, ForeignKey('categories.id', ondelete='CASCADE'), primary_key=True),
+    Column('created_at', DateTime, default=datetime.utcnow)
+)
 
 
 class Platform(Base):
@@ -83,7 +97,7 @@ class Category(Base):
     # Relationships
     platform = relationship("Platform", back_populates="categories")
     parent = relationship("Category", remote_side=[id], backref="children")
-    products = relationship("Product", back_populates="category")
+    products = relationship("Product", secondary=product_categories, back_populates="categories")
     catalogues = relationship("Catalogue", back_populates="category")
 
 
@@ -109,7 +123,7 @@ class Catalogue(Base):
     deleted_at = Column(DateTime, nullable=True)  # Soft delete support
 
     # Relationships
-    products = relationship("Product", back_populates="catalogue", foreign_keys="Product.catalogue_id")
+    products = relationship("Product", back_populates="catalogue", foreign_keys="Product.catalogue_id", cascade="all, delete-orphan")
     category = relationship("Category", back_populates="catalogues")
     banner_media = relationship("MediaAsset", foreign_keys=[banner_media_id])
 
@@ -120,6 +134,7 @@ class Product(Base):
     Product = one color only.
     Multiple products with the same catalogue_id = different colors of the same design.
     Gender and platform are inherited from catalogue → category → platform.
+    Products can belong to multiple categories for better discoverability.
     """
     __tablename__ = "products"
 
@@ -127,7 +142,6 @@ class Product(Base):
     name = Column(String(255), nullable=False)  # e.g., "AirFlex Running Shoe - Red"
     slug = Column(String(255), nullable=False, unique=True)
     brand_id = Column(Integer, ForeignKey("brands.id"), nullable=True)
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     catalogue_id = Column(Integer, ForeignKey("catalogues.id"), nullable=False)  # Required - Article/design reference
     color = Column(String(100), nullable=True)  # Display color name (e.g., "White/Skyblue")
     color_hex = Column(String(50), nullable=True)  # Hex codes (e.g., "#FFFFFF,#87CEEB" for multi-color)
@@ -136,6 +150,7 @@ class Product(Base):
     mrp = Column(Integer, nullable=True)  # Maximum Retail Price
     short_description = Column(Text, nullable=True)
     long_description = Column(Text, nullable=True)
+    specifications = Column(Text, nullable=True)  # Product specifications (e.g., material, care instructions)
     is_featured = Column(Boolean, default=False)  # Deprecated: Use tags instead
     tags = Column(Text, nullable=True)  # Comma-separated tags: new,trending,featured,bestseller,sale
     status = Column(String(20), default="draft")  # draft | live | archived
@@ -147,11 +162,11 @@ class Product(Base):
 
     # Relationships
     brand = relationship("Brand", back_populates="products")
-    category = relationship("Category", back_populates="products")
+    categories = relationship("Category", secondary=product_categories, back_populates="products")
     catalogue = relationship("Catalogue", back_populates="products", foreign_keys=[catalogue_id])
     variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan")
-    media_assets = relationship("MediaAsset", back_populates="product")
-    footwear_details = relationship("FootwearDetails", back_populates="product", uselist=False)
+    media_assets = relationship("MediaAsset", back_populates="product", cascade="all, delete-orphan")
+    footwear_details = relationship("FootwearDetails", back_populates="product", cascade="all, delete-orphan", uselist=False)
 
     def get_tags_list(self) -> list:
         """Get tags as a list"""
@@ -176,9 +191,9 @@ class Product(Base):
         return self.catalogue.gender if self.catalogue else None
 
     @property
-    def platform(self):
-        """Get platform from category"""
-        return self.category.platform if self.category else None
+    def category_ids(self) -> list:
+        """Get list of category IDs this product belongs to"""
+        return [cat.id for cat in self.categories] if self.categories else []
 
 
 class ProductVariant(Base):

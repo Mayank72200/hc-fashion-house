@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ProductAPI, CatalogueAPI, CategoryAPI, PRODUCT_TAGS } from '@/lib/api';
 import { menProducts, womenProducts, kidsProducts, segmentBrands } from '@/data/products';
 import { toIndianSizes } from '@/utils/sizeConversion';
+import { extractMediaUrl } from '@/utils/imageUtils';
 
 // Check if API is available
 const API_ENABLED = Boolean(import.meta.env.VITE_API_URL);
@@ -309,9 +310,9 @@ export function useProductDetail(productId) {
           // API returns: media_grouped: { catalogue: [{cloudinary_url, ...}], lifestyle: [], banner: [] }
           const catalogueImages = response.media_grouped?.catalogue || [];
           const images = catalogueImages.length > 0 
-            ? catalogueImages.map(m => m.cloudinary_url)
-            : (apiProduct.images || [apiProduct.primary_image_url || '/placeholder.jpg']);
-          const primaryImage = images[0] || '/placeholder.jpg';
+            ? catalogueImages.map(m => extractMediaUrl(m))
+            : (apiProduct.images || [apiProduct.primary_image_url || '/placeholder.jpg']).map(img => extractMediaUrl(img));
+          const primaryImage = images[0] || extractMediaUrl('/placeholder.jpg');
           
           // Get sizes from availability.sizes if available, otherwise from variants
           // Store the original size chart type for conversion

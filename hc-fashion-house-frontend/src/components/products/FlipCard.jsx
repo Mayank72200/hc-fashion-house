@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useCart } from '@/contexts/CartContext';
 import { useWishlist } from '@/contexts/WishlistContext';
 import { toast } from 'sonner';
+import { getImageProps, resolveImageUrl } from '@/utils/imageUtils';
 
 // Color mapping for swatches
 const colorMap = {

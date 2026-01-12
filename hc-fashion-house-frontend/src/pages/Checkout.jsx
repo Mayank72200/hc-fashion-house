@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import CheckoutAddressSelector from '@/components/checkout/CheckoutAddressSelector';
 import CheckoutSummary from '@/components/checkout/CheckoutSummary';
 import { OrderAPI } from '@/lib/api';
+import { getImageProps } from '@/utils/imageUtils';
 
 export default function Checkout() {
   const { items, subtotal, itemCount, clearCart } = useCart();

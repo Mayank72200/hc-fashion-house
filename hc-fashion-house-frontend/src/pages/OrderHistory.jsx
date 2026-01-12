@@ -19,6 +19,7 @@ import {
 import Layout from '@/components/layout/Layout';
 import { OrderAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { getImageProps } from '@/utils/imageUtils';
 
 // Mock order data
 const mockOrders = [

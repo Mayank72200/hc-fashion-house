@@ -10,6 +10,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import FlipCard from '@/components/products/FlipCard';
 import { useBestsellerProducts } from '@/hooks/useProducts';
 import { AdminBrandAPI } from '@/lib/adminApi';
+import { extractMediaUrl } from '@/utils/imageUtils';
 
 // Import shoe images
 import heroShoe1 from '@/assets/shoes/hero-shoe-1.png';
@@ -332,7 +333,7 @@ export default function Index() {
           .filter(brand => brand.is_active)
           .map(brand => ({
             name: brand.name,
-            logo: brand.logo_cloudinary_url || brand.logo_url || brand.logo
+            logo: extractMediaUrl(brand.logo_cloudinary_url || brand.logo_url || brand.logo)
           }));
         setBrands(transformedBrands);
       } catch (error) {

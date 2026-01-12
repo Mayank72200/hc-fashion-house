@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { AdminAPI } from '@/lib/api';
+import { extractMediaUrl } from '@/utils/imageUtils';
 
 // ========================
 // Constants
@@ -84,7 +85,7 @@ function transformProduct(product) {
   const mediaAssets = product.media_assets || product.media || [];
   if (mediaAssets.length > 0) {
     const primaryMedia = mediaAssets.find(m => m.is_primary) || mediaAssets[0];
-    image = primaryMedia.cloudinary_url || primaryMedia.media_url;
+    image = extractMediaUrl(primaryMedia);
   }
 
   // Calculate total stock from variants and their options

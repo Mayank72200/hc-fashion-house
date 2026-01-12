@@ -384,6 +384,7 @@ VALID_PRODUCT_TAGS = {
 class ProductBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Product name (e.g., AirFlex Running Shoe - Red)")
     catalogue_id: int = Field(..., description="Catalogue/Article ID (required)")
+    category_ids: List[int] = Field([], description="Category IDs for product classification (multiple allowed)")
     brand_id: Optional[int] = Field(None, description="Brand ID (foreign key)")
     color: Optional[str] = Field(None, max_length=100, description="Primary color name")
     color_hex: Optional[str] = Field(None, max_length=7, description="Color hex code (e.g., #FF0000)")
@@ -391,6 +392,7 @@ class ProductBase(BaseModel):
     price: Optional[int] = Field(None, ge=0, description="Selling price in rupees (if discounted)")
     short_description: Optional[str] = Field(None, description="Short product description")
     long_description: Optional[str] = Field(None, description="Detailed product description")
+    specifications: Optional[str] = Field(None, description="Product specifications (material, care instructions, etc.)")
     is_featured: bool = Field(False, description="Whether product is featured")
     tags: List[str] = Field([], description="Product tags for sections (new, trending, featured, bestseller, sale, hot, etc.)")
     status: ProductStatus = Field(ProductStatus.DRAFT, description="Product status")
@@ -451,6 +453,7 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     slug: Optional[str] = Field(None, max_length=255)
     catalogue_id: Optional[int] = None
+    category_ids: Optional[List[int]] = None
     brand_id: Optional[int] = None
     color: Optional[str] = Field(None, max_length=100)
     color_hex: Optional[str] = Field(None, max_length=7)
@@ -458,6 +461,7 @@ class ProductUpdate(BaseModel):
     price: Optional[int] = Field(None, ge=0)
     short_description: Optional[str] = None
     long_description: Optional[str] = None
+    specifications: Optional[str] = None
     is_featured: Optional[bool] = None
     tags: Optional[List[str]] = None
     status: Optional[ProductStatus] = None

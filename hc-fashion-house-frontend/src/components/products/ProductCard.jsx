@@ -8,6 +8,7 @@ import { useWishlist } from '@/contexts/WishlistContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { getImageProps } from '@/utils/imageUtils';
 
 export default function ProductCard({ product, viewMode = 'grid', index = 0, colorVariants = [] }) {
   const { addItem } = useCart();
@@ -54,8 +55,7 @@ export default function ProductCard({ product, viewMode = 'grid', index = 0, col
         >
           <div className="w-32 h-32 flex-shrink-0 bg-image rounded-xl overflow-hidden relative">
             <img 
-              src={product.image} 
-              alt={product.name} 
+              {...getImageProps(product.image, product.name)}
               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
             />
             {product.isNew && (
@@ -157,8 +157,7 @@ export default function ProductCard({ product, viewMode = 'grid', index = 0, col
           <AnimatePresence mode="wait">
             <motion.img 
               key={displayProduct.id}
-              src={displayProduct.image} 
-              alt={displayProduct.name}
+              {...getImageProps(displayProduct.image, displayProduct.name)}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

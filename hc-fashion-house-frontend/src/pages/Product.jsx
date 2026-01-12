@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProductDetail, useProducts } from '@/hooks/useProducts';
 import { convertSize } from '@/utils/sizeConversion';
+import { extractMediaUrl, getImageProps } from '@/utils/imageUtils';
 
 // Category accent colors
 const categoryAccents = {

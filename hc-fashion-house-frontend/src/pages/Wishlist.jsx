@@ -6,6 +6,7 @@ import Layout from '@/components/layout/Layout';
 import { useWishlist } from '@/contexts/WishlistContext';
 import { useCart } from '@/contexts/CartContext';
 import { toast } from 'sonner';
+import { getImageProps } from '@/utils/imageUtils';
 
 export default function Wishlist() {
   const { items, removeItem, clearAll } = useWishlist();

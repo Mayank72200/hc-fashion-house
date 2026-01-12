@@ -134,6 +134,9 @@ def product_to_dict(product: Product) -> dict:
                 "usage_type": m.usage_type,
             })
     
+    # Get category IDs
+    category_ids = [cat.id for cat in product.categories] if product.categories else []
+    
     return {
         "id": product.id,
         "name": product.name,
@@ -142,6 +145,7 @@ def product_to_dict(product: Product) -> dict:
         "catalogue_name": catalogue_name,  # Add catalogue name for display
         "brand_id": product.brand_id,
         "brand": brand_to_dict(product.brand) if product.brand else None,
+        "category_ids": category_ids,  # Multiple categories
         "color": product.color,
         "color_hex": product.color_hex,
         "color_normalized": product.color_normalized,
@@ -149,6 +153,7 @@ def product_to_dict(product: Product) -> dict:
         "mrp": product.mrp,      # Maximum Retail Price (original price)
         "short_description": product.short_description,
         "long_description": product.long_description,
+        "specifications": product.specifications,
         "is_featured": product.is_featured or False,
         "tags": product.get_tags_list() if hasattr(product, 'get_tags_list') else [],
         "status": ProductStatus(product.status) if product.status else ProductStatus.DRAFT,
@@ -729,17 +734,18 @@ class CatalogueService:
 
     @staticmethod
     def delete_catalogue(db: Session, catalogue_id: int) -> bool:
-        """Delete a catalogue - will also remove catalogue reference from products"""
+        """
+        Delete a catalogue and cascade delete all associated products.
+        This will also cascade delete:
+        - All products in the catalogue
+        - All variants of those products
+        - All media assets of those products
+        - All footwear details of those products
+        """
         catalogue = CatalogueService.get_catalogue(db, catalogue_id)
 
-        # Check if catalogue has products
-        products_count = db.query(Product).filter(Product.catalogue_id == catalogue_id).count()
-        if products_count > 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot delete catalogue with {products_count} associated products. Reassign or delete products first."
-            )
-
+        # Cascade delete happens automatically via SQLAlchemy relationship
+        # Thanks to cascade="all, delete-orphan" on Catalogue.products
         db.delete(catalogue)
         db.commit()
         return True
@@ -763,9 +769,11 @@ class ProductService:
         """
         Create a new product (color SKU) with variants and options.
         catalogue_id is REQUIRED.
+        Products can belong to multiple categories.
         """
         print(f"[DEBUG] Creating product: {product_data.name}")
         print(f"[DEBUG] catalogue_id: {product_data.catalogue_id}, brand_id: {product_data.brand_id}")
+        print(f"[DEBUG] category_ids: {product_data.category_ids}")
         
         slug = product_data.slug or generate_slug(product_data.name)
         print(f"[DEBUG] Generated slug: {slug}")
@@ -788,12 +796,25 @@ class ProductService:
                 detail=f"Catalogue with ID {product_data.catalogue_id} not found"
             )
 
-        # Get category_id from catalogue
-        category_id = catalogue.category_id
-        if not category_id:
+        # If no categories provided, use catalogue's category
+        category_ids = product_data.category_ids or []
+        if not category_ids and catalogue.category_id:
+            category_ids = [catalogue.category_id]
+        
+        if not category_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Catalogue does not have a category assigned"
+                detail="Product must have at least one category"
+            )
+
+        # Verify all categories exist
+        categories = db.query(Category).filter(Category.id.in_(category_ids)).all()
+        if len(categories) != len(category_ids):
+            found_ids = {cat.id for cat in categories}
+            missing_ids = set(category_ids) - found_ids
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Categories not found: {missing_ids}"
             )
 
         # Verify brand if provided
@@ -811,19 +832,16 @@ class ProductService:
             color_normalized = normalize_color(product_data.color) if product_data.color else None
             
             # Create product
-            # DB uses 'price' (selling price) and 'mrp' (original price)
-            # API now uses same: 'mrp' (MRP) and 'price' (discounted price)
             product = Product(
                 name=product_data.name,
                 slug=slug,
                 catalogue_id=product_data.catalogue_id,
-                category_id=category_id,
                 brand_id=product_data.brand_id,
-                color=product_data.color,  # Display color (e.g., "White/Skyblue")
-                color_hex=product_data.color_hex,  # Hex code(s) (e.g., "#FFFFFF,#87CEEB")
-                color_normalized=color_normalized,  # For filtering (e.g., "white-skyblue")
-                price=product_data.price or product_data.mrp,  # Selling price (use price if available, else mrp)
-                mrp=product_data.mrp,  # MRP (original price)
+                color=product_data.color,
+                color_hex=product_data.color_hex,
+                color_normalized=color_normalized,
+                price=product_data.price or product_data.mrp,
+                mrp=product_data.mrp,
                 short_description=product_data.short_description,
                 long_description=product_data.long_description,
                 is_featured=product_data.is_featured or ('featured' in product_data.tags),
@@ -834,13 +852,17 @@ class ProductService:
             )
             db.add(product)
             db.flush()  # Get product ID without committing
+            
+            # Associate product with categories
+            product.categories = categories
+            db.flush()
 
             # Create variants (sizes)
             for variant_data in product_data.variants:
                 variant = ProductVariant(
                     product_id=product.id,
                     sku=variant_data.sku,
-                    variant_name=variant_data.size,  # Map size to variant_name
+                    variant_name=variant_data.size,
                     price_override=variant_data.price_override,
                     mrp_override=variant_data.mrp_override,
                     is_active=variant_data.is_active
@@ -897,7 +919,9 @@ class ProductService:
     @staticmethod
     def get_product(db: Session, product_id: int) -> Product:
         """Get a product by ID with all related data"""
-        product = db.query(Product).filter(Product.id == product_id).first()
+        product = db.query(Product).options(
+            joinedload(Product.categories)
+        ).filter(Product.id == product_id).first()
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -982,6 +1006,19 @@ class ProductService:
                     detail=f"Product with slug '{update_data['slug']}' already exists"
                 )
 
+        # Handle category_ids - update many-to-many relationship
+        category_ids = update_data.pop('category_ids', None)
+        if category_ids is not None:
+            categories = db.query(Category).filter(Category.id.in_(category_ids)).all()
+            if len(categories) != len(category_ids):
+                found_ids = {cat.id for cat in categories}
+                missing_ids = set(category_ids) - found_ids
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Categories not found: {missing_ids}"
+                )
+            product.categories = categories
+
         # Handle status enum
         if 'status' in update_data and update_data['status']:
             update_data['status'] = update_data['status'].value
@@ -1013,16 +1050,18 @@ class ProductService:
 
     @staticmethod
     def delete_product(db: Session, product_id: int) -> bool:
-        """Delete a product and all related data"""
+        """
+        Delete a product and cascade delete all related data.
+        This will cascade delete:
+        - All variants of the product
+        - All variant options
+        - All media assets
+        - Footwear details
+        """
         product = ProductService.get_product(db, product_id)
 
-        # Delete media assets
-        db.query(MediaAsset).filter(MediaAsset.product_id == product_id).delete()
-
-        # Delete footwear details
-        db.query(FootwearDetails).filter(FootwearDetails.product_id == product_id).delete()
-
-        # Delete the product (cascades to variants and options)
+        # All related data will be cascade deleted via SQLAlchemy relationships
+        # Thanks to cascade="all, delete-orphan" on Product relationships
         db.delete(product)
         db.commit()
         return True
