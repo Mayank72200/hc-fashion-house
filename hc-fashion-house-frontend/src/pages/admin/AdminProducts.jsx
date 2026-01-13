@@ -147,32 +147,46 @@ function transformProduct(product) {
 
 function StatusBadge({ status }) {
   const styles = {
-    live: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-    draft: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    archived: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+    live: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800',
+    draft: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
+    archived: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700',
   };
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${styles[status] || styles.draft}`}>
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${styles[status] || styles.draft}`}>
       {status}
     </span>
   );
 }
 
-function ColorBadge({ color }) {
-  const hex = COLOR_MAP[color];
+function ColorBadge({ color, colorHex }) {
+  const hex = colorHex || COLOR_MAP[color] || null;
+  
+  // Calculate if color is light or dark for contrast
+  const isLightColor = hex ? (() => {
+    const cleanHex = hex.replace('#', '');
+    const r = parseInt(cleanHex.substr(0, 2), 16);
+    const g = parseInt(cleanHex.substr(2, 2), 16);
+    const b = parseInt(cleanHex.substr(4, 2), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5;
+  })() : false;
   
   return (
     <div className="flex items-center gap-2">
       {hex ? (
         <div 
-          className="w-5 h-5 rounded-full border border-gray-300 dark:border-gray-600"
+          className={`w-5 h-5 rounded-full flex-shrink-0 ${
+            isLightColor ? 'border border-gray-300 dark:border-gray-500' : 'border border-transparent'
+          }`}
           style={{ backgroundColor: hex }}
         />
       ) : (
-        <Palette className="w-4 h-4 text-muted-foreground" />
+        <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+          <Palette className="w-3 h-3 text-muted-foreground" />
+        </div>
       )}
-      <span className="text-sm">{color || 'N/A'}</span>
+      <span className="text-sm text-gray-700 dark:text-gray-300">{color || 'N/A'}</span>
     </div>
   );
 }
@@ -206,13 +220,13 @@ function TagsBadge({ tags }) {
       {displayTags.map((tag, i) => (
         <span 
           key={i}
-          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
         >
           {tag}
         </span>
       ))}
       {remaining > 0 && (
-        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
+        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
           +{remaining}
         </span>
       )}
@@ -343,7 +357,11 @@ function TagManagementDialog({ product, open, onOpenChange, onSave }) {
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
+          <Button 
+            onClick={handleSave} 
+            disabled={saving} 
+            className="gap-2 bg-[#C9A24D] hover:bg-[#B8933E] text-white font-medium shadow-sm"
+          >
             {saving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -568,7 +586,7 @@ export default function AdminProducts() {
             Refresh
           </Button>
           <Link to="/admin/products/new">
-            <Button className="gap-2">
+            <Button className="gap-2 bg-[#C9A24D] hover:bg-[#B8933E] text-white font-medium py-2.5 shadow-sm">
               <Plus className="w-4 h-4" />
               Add Product
             </Button>
@@ -694,7 +712,7 @@ export default function AdminProducts() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-foreground">{product.article || product.category}</span>
                       {catalogueColorCounts[product.article] > 1 && (
-                        <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">
                           {catalogueColorCounts[product.article]} colors
                         </span>
                       )}
@@ -704,7 +722,7 @@ export default function AdminProducts() {
                     <span className="text-sm text-foreground">{product.brand}</span>
                   </td>
                   <td className="py-4 px-4">
-                    <ColorBadge color={product.color} />
+                    <ColorBadge color={product.color} colorHex={product.colorHex} />
                   </td>
                   <td className="py-4 px-4">
                     <div>

@@ -498,3 +498,151 @@ class AccessoryDetails(Base):
 
     product = relationship("Product")
 
+
+# ========================
+# Website Control Center Models
+# ========================
+
+# Association table for section products (many-to-many)
+section_products = Table(
+    'section_products',
+    Base.metadata,
+    Column('section_id', Integer, ForeignKey('featured_sections.id', ondelete='CASCADE'), primary_key=True),
+    Column('product_id', Integer, ForeignKey('products.id', ondelete='CASCADE'), primary_key=True),
+    Column('display_order', Integer, default=0),
+    Column('created_at', DateTime, default=datetime.utcnow)
+)
+
+
+class BannerPlacement(Base):
+    """
+    Banner images with placement information for dynamic website sections.
+    Placements: hero_main, hero_secondary, promo_left, promo_right, 
+                category_banner, segment_hero, footer_banner, etc.
+    """
+    __tablename__ = "banner_placements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)  # Display name for admin
+    placement_key = Column(String(100), nullable=False)  # hero_main, promo_left, etc.
+    
+    # Image details
+    image_url = Column(Text, nullable=True)  # Cloudinary URL
+    image_public_id = Column(String(255), nullable=True)  # Cloudinary public ID
+    
+    # Banner content
+    title = Column(String(255), nullable=True)  # Overlay title
+    subtitle = Column(String(500), nullable=True)  # Overlay subtitle
+    button_text = Column(String(100), nullable=True)  # CTA button text
+    button_link = Column(String(500), nullable=True)  # CTA button URL
+    
+    # Targeting
+    platform_slug = Column(String(100), nullable=True)  # For segment-specific banners
+    gender = Column(String(20), nullable=True)  # men, women, unisex, kids
+    
+    # Display settings
+    display_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    
+    # Schedule (optional)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('placement_key', 'platform_slug', 'gender', name='uq_banner_placement'),
+    )
+
+
+class FeaturedSection(Base):
+    """
+    Dynamic featured sections for homepage and segment pages.
+    Sections: trending, new_arrivals, featured, bestsellers, sale, etc.
+    Each section can have products assigned to it.
+    """
+    __tablename__ = "featured_sections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)  # Display name
+    section_key = Column(String(100), nullable=False)  # trending, new_arrivals, etc.
+    
+    # Section settings
+    title = Column(String(255), nullable=True)  # Section title on website
+    subtitle = Column(String(500), nullable=True)  # Section subtitle
+    
+    # Targeting
+    platform_slug = Column(String(100), nullable=True)  # null = all platforms
+    gender = Column(String(20), nullable=True)  # null = all genders
+    page_type = Column(String(50), default='home')  # home, segment, category
+    
+    # Display settings
+    max_products = Column(Integer, default=8)  # Max products to show
+    display_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    
+    # Auto-populate settings (alternative to manual product selection)
+    auto_populate = Column(Boolean, default=False)  # If true, use criteria below
+    auto_criteria = Column(String(100), nullable=True)  # newest, bestselling, most_viewed, random
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    products = relationship("Product", secondary=section_products, backref="featured_sections")
+
+    __table_args__ = (
+        UniqueConstraint('section_key', 'platform_slug', 'gender', 'page_type', name='uq_featured_section'),
+    )
+
+
+class MediaAssetLibrary(Base):
+    """
+    Central media library for all uploaded assets.
+    This tracks all images uploaded to Cloudinary for easy management.
+    """
+    __tablename__ = "media_asset_library"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # File info
+    name = Column(String(255), nullable=False)  # Original filename
+    file_type = Column(String(50), default='image')  # image, video
+    mime_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)  # Size in bytes
+    
+    # Cloudinary info
+    cloudinary_url = Column(Text, nullable=False)
+    cloudinary_public_id = Column(String(255), nullable=False)
+    folder_path = Column(String(255), nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    
+    # Usage tracking
+    usage_type = Column(String(50), default='general')  # banner, product, lifestyle, icon
+    usage_location = Column(String(255), nullable=True)  # Description of where it's used
+    
+    # Metadata
+    alt_text = Column(String(500), nullable=True)
+    tags = Column(Text, nullable=True)  # Comma-separated tags for search
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SiteSettings(Base):
+    """
+    General site settings and configuration.
+    Key-value store for site-wide settings.
+    """
+    __tablename__ = "site_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    setting_key = Column(String(100), nullable=False, unique=True)
+    setting_value = Column(Text, nullable=True)
+    setting_type = Column(String(50), default='string')  # string, number, boolean, json
+    description = Column(Text, nullable=True)
+    
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

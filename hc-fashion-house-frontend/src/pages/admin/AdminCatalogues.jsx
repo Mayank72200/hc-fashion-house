@@ -199,14 +199,14 @@ function CatalogueModal({ isOpen, onClose, catalogue, categories, onSave }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-300"
+              className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-300 font-medium"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] transition-colors disabled:opacity-50 shadow-sm"
             >
               {saving ? (
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -427,14 +427,14 @@ function AddProductModal({ isOpen, onClose, catalogue, categories, onSave }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-300"
+              className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-300 font-medium"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] transition-colors disabled:opacity-50 shadow-sm"
             >
               {saving ? (
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -459,20 +459,31 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
     const params = new URLSearchParams();
     params.append('catalogue_id', catalogue.id);
     params.append('catalogue_name', catalogue.name);
+    params.append('add_color_mode', 'true'); // Flag to indicate add color mode
     
-    // If category is available, add it
-    if (catalogue.category_id) {
-      params.append('category_id', catalogue.category_id);
-    }
-    
-    // Get platform and gender from first existing product (if available)
+    // Get data from first existing product (if available)
     if (products.length > 0) {
       const firstProduct = products[0];
+      
+      // Platform - prefer platform_slug, fallback to platform_id
+      if (firstProduct.platform_slug) {
+        params.append('platform_slug', firstProduct.platform_slug);
+      }
       if (firstProduct.platform_id) {
         params.append('platform_id', firstProduct.platform_id);
       }
+      
+      // Gender
       if (firstProduct.gender) {
         params.append('gender', firstProduct.gender);
+      }
+      
+      // Category IDs - pass multiple as comma-separated
+      if (firstProduct.category_ids && firstProduct.category_ids.length > 0) {
+        params.append('category_ids', firstProduct.category_ids.join(','));
+      } else if (catalogue.category_id) {
+        // Fallback to catalogue's category
+        params.append('category_ids', catalogue.category_id);
       }
     }
     
@@ -481,24 +492,26 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
   };
 
   return (
-    <div className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 h-full flex flex-col">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+    <div className="border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 h-full flex flex-col">
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-gray-900 dark:text-white">{catalogue.name}</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {products.length} color{products.length !== 1 ? 's' : ''} available
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             onClick={onRefresh}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors"
+            title="Refresh"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors"
+            title="Close"
           >
             <X className="h-4 w-4" />
           </button>
@@ -508,15 +521,17 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
       <div className="flex-1 overflow-y-auto p-4">
         {loading ? (
           <div className="flex items-center justify-center py-8">
-            <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+            <RefreshCw className="h-6 w-6 animate-spin text-[#C9A24D]" />
           </div>
         ) : products.length === 0 ? (
           <div className="text-center py-8">
-            <Palette className="h-12 w-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-            <p className="text-gray-500 dark:text-gray-400 mb-4">No color SKUs yet</p>
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-[#C9A24D]/10 flex items-center justify-center">
+              <Palette className="h-8 w-8 text-[#C9A24D]" />
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">No color SKUs yet</p>
             <button
               onClick={handleAddColor}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] transition-colors shadow-sm"
             >
               <Plus className="h-4 w-4" />
               Add First Color
@@ -524,52 +539,71 @@ function CatalogueDetailPanel({ catalogue, products, loading, onAddProduct, onRe
           </div>
         ) : (
           <div className="space-y-3">
-            {products.map((product) => (
-              <div
-                key={product.id}
-                className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-[#C9A24D] transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-8 h-8 rounded-full border-2 border-gray-300 dark:border-gray-600"
-                      style={{
-                        backgroundColor: product.hex || product.color_hex || '#ccc',
-                      }}
-                      title={product.color}
-                    />
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white text-sm">
-                        {product.name}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {product.color} • ₹{product.price?.toLocaleString('en-IN') || 0}
-                      </p>
+            {products.map((product) => {
+              // Calculate if color is light or dark for contrast
+              const hexColor = product.hex || product.color_hex || '#cccccc';
+              const isLightColor = (() => {
+                const hex = hexColor.replace('#', '');
+                const r = parseInt(hex.substr(0, 2), 16);
+                const g = parseInt(hex.substr(2, 2), 16);
+                const b = parseInt(hex.substr(4, 2), 16);
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                return luminance > 0.5;
+              })();
+              
+              return (
+                <div
+                  key={product.id}
+                  className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-[#C9A24D] transition-colors bg-gray-50 dark:bg-gray-800/50"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {/* Color swatch with border for light colors */}
+                      <div
+                        className={`w-10 h-10 rounded-full flex-shrink-0 shadow-sm ${
+                          isLightColor ? 'border-2 border-gray-300 dark:border-gray-500' : 'border-2 border-transparent'
+                        }`}
+                        style={{ backgroundColor: hexColor }}
+                        title={product.color}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                          {product.name}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                            {product.color}
+                          </span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            ₹{product.price?.toLocaleString('en-IN') || 0}
+                          </span>
+                        </div>
+                      </div>
                     </div>
+                    <span
+                      className={`text-xs px-2 py-1 rounded-full font-medium ${
+                        product.status === 'live'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                          : product.status === 'draft'
+                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {product.status}
+                    </span>
                   </div>
-                  <span
-                    className={`text-xs px-2 py-1 rounded-full ${
-                      product.status === 'live'
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                        : product.status === 'draft'
-                        ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    {product.status}
-                  </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
       {products.length > 0 && (
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
           <button
             onClick={handleAddColor}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] transition-colors shadow-sm"
           >
             <Plus className="h-4 w-4" />
             Add Another Color
@@ -693,7 +727,7 @@ export default function AdminCatalogues() {
 
           <button
             onClick={() => setCatalogueModal({ open: true, catalogue: null })}
-            className="flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240] transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] transition-colors shadow-sm"
           >
             <Plus className="h-4 w-4" />
             New Article
@@ -737,7 +771,7 @@ export default function AdminCatalogues() {
             {!search && (
               <button
                 onClick={() => setCatalogueModal({ open: true, catalogue: null })}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-[#C9A24D] text-gray-900 rounded-lg hover:bg-[#B89240]"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#C9A24D] text-white font-medium rounded-lg hover:bg-[#B89240] shadow-sm"
               >
                 <Plus className="h-4 w-4" />
                 Create First Article
@@ -749,7 +783,7 @@ export default function AdminCatalogues() {
             {filteredCatalogues.map((catalogue) => (
               <div
                 key={catalogue.id}
-                className={`bg-white dark:bg-gray-900 rounded-xl border transition-all cursor-pointer ${
+                className={`bg-white dark:bg-gray-800 rounded-xl border transition-all cursor-pointer shadow-sm hover:shadow-md ${
                   selectedCatalogue?.id === catalogue.id
                     ? 'border-[#C9A24D] ring-2 ring-[#C9A24D]/20'
                     : 'border-gray-200 dark:border-gray-700 hover:border-[#C9A24D]/50'
@@ -758,19 +792,19 @@ export default function AdminCatalogues() {
               >
                 <div className="p-4">
                   <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 dark:text-white">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-900 dark:text-white truncate">
                         {catalogue.name}
                       </h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
                         {getCategoryName(catalogue.category_id)}
                       </p>
                     </div>
                     <span
-                      className={`text-xs px-2 py-1 rounded-full ${
+                      className={`text-xs px-2.5 py-1 rounded-full font-medium flex-shrink-0 ml-2 ${
                         catalogue.is_active
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
                       }`}
                     >
                       {catalogue.is_active ? 'Active' : 'Inactive'}
@@ -783,30 +817,31 @@ export default function AdminCatalogues() {
                     </p>
                   )}
 
-                  <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
-                      <Palette className="h-4 w-4" />
-                      <span>{catalogue.product_count || 0} color{(catalogue.product_count || 0) !== 1 ? 's' : ''}</span>
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
+                      <Palette className="h-4 w-4 text-[#C9A24D]" />
+                      <span className="font-medium">{catalogue.product_count || 0}</span>
+                      <span>color{(catalogue.product_count || 0) !== 1 ? 's' : ''}</span>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedCatalogue(catalogue);
-                        // Will trigger fetchCatalogueProducts, then use detail panel's Add Color button
-                      }}
-                      className="text-sm text-[#C9A24D] hover:underline flex items-center gap-1"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Add Color
-                    </button>
-
+                    
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCatalogue(catalogue);
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-[#C9A24D]/10 text-[#C9A24D] transition-colors"
+                        title="Add Color"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setCatalogueModal({ open: true, catalogue });
                         }}
-                        className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
+                        title="Edit"
                       >
                         <Edit className="h-4 w-4" />
                       </button>
@@ -815,7 +850,8 @@ export default function AdminCatalogues() {
                           e.stopPropagation();
                           handleDeleteCatalogue(catalogue);
                         }}
-                        className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500"
+                        className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors"
+                        title="Delete"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

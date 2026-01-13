@@ -134,8 +134,9 @@ def product_to_dict(product: Product) -> dict:
                 "usage_type": m.usage_type,
             })
     
-    # Get category IDs
+    # Get category IDs and full category objects for display
     category_ids = [cat.id for cat in product.categories] if product.categories else []
+    categories_list = [{"id": cat.id, "name": cat.name, "slug": cat.slug} for cat in product.categories] if product.categories else []
     
     return {
         "id": product.id,
@@ -145,7 +146,8 @@ def product_to_dict(product: Product) -> dict:
         "catalogue_name": catalogue_name,  # Add catalogue name for display
         "brand_id": product.brand_id,
         "brand": brand_to_dict(product.brand) if product.brand else None,
-        "category_ids": category_ids,  # Multiple categories
+        "category_ids": category_ids,  # Multiple categories (IDs only)
+        "categories": categories_list,  # Full category objects with id, name, slug
         "color": product.color,
         "color_hex": product.color_hex,
         "color_normalized": product.color_normalized,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -209,10 +209,11 @@ const generateSlug = (name) => {
     .replace(/(^-|-$)/g, '');
 };
 
-const generateSKU = (article, color, size) => {
-  const articlePart = article?.replace(/[^a-zA-Z0-9]/g, '')?.substring(0, 4)?.toUpperCase() || 'PROD';
-  const colorPart = color?.replace(/[^a-zA-Z0-9]/g, '')?.substring(0, 3)?.toUpperCase() || 'COL';
-  const parts = [articlePart, colorPart];
+// Generate SKU: BRANDNAME-PRODUCTSLUG-SIZE (e.g., YOSTAR-HR-416-WHITE-SKYBLUE-7)
+const generateSKU = (brandName, productSlug, size) => {
+  const brandPart = brandName?.replace(/[^a-zA-Z0-9]/g, '')?.toUpperCase() || 'BRAND';
+  const slugPart = productSlug?.replace(/[^a-zA-Z0-9-]/g, '')?.toUpperCase() || 'PRODUCT';
+  const parts = [brandPart, slugPart];
   if (size) {
     parts.push(String(size).toUpperCase());
   }
@@ -869,9 +870,8 @@ function ProductPreviewCard({ product, catalogueData }) {
 
 // Size Variant Row Component
 function SizeVariantRow({ size, data, baseSKU, color, onUpdate, onRemove, isFirst, onFillAll }) {
-  // Format color for SKU: "White/Grey" -> "WHITE-GREY"
-  const colorPart = color?.replace(/[^a-zA-Z0-9]/g, '-')?.replace(/-+/g, '-')?.replace(/^-|-$/g, '')?.toUpperCase() || '';
-  const autoSKU = colorPart ? `${baseSKU}-${colorPart}-${size}` : `${baseSKU}-${size}`;
+  // SKU format: BRANDNAME-PRODUCTSLUG-SIZE (color is already part of product slug)
+  const autoSKU = `${baseSKU}-${size}`;
   
   // For the first row, use onFillAll to update ALL rows at once (including itself)
   // For other rows, just update that single row
@@ -985,7 +985,7 @@ function ProductTab({
   const availableSizes = SIZE_OPTIONS_BY_CHART_TYPE[sizeChartType]?.[catalogueData.gender] || 
                          SIZE_OPTIONS_BY_CHART_TYPE['IND'][catalogueData.gender] || 
                          SIZE_OPTIONS.men;
-  const baseSKU = generateSKU(catalogueData.article, product.color, '');
+  const baseSKU = generateSKU(product.brandName, product.slug || product.name, '');
 
   const handleSizeToggle = (size, checked) => {
     const newSelectedSizes = checked
@@ -1095,18 +1095,6 @@ function ProductTab({
               onChange={(e) => onUpdate({ ...product, slug: e.target.value })}
               placeholder="auto-generated"
               className="h-11 font-mono text-sm"
-            />
-          </div>
-
-          {/* Base SKU */}
-          <div className="space-y-2">
-            <Label htmlFor={`sku-${index}`}>Base SKU *</Label>
-            <Input
-              id={`sku-${index}`}
-              value={product.sku}
-              onChange={(e) => onUpdate({ ...product, sku: e.target.value.toUpperCase() })}
-              placeholder="e.g., SNKR-BLK"
-              className="h-11 font-mono"
             />
           </div>
 
@@ -1476,6 +1464,13 @@ export default function AdminProductForm() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const isEditing = Boolean(id);
+  
+  // Check if we're in "Add Color" mode (coming from Catalogues page)
+  const isAddColorMode = searchParams.get('add_color_mode') === 'true';
+  
+  // Ref to track if categories were loaded in edit mode
+  // Initialize as true in edit mode to prevent premature useEffect fetch
+  const categoriesLoadedInEditMode = useRef(isEditing || isAddColorMode);
 
   // ========================
   // Helper Functions
@@ -1581,8 +1576,8 @@ export default function AdminProductForm() {
         setPlatforms(platformsData || []);
         setBrands(brandsData || []);
         
-        // Set default platform if available
-        if (platformsData?.length > 0) {
+        // Set default platform ONLY in create mode, not edit mode
+        if (!isEditing && platformsData?.length > 0) {
           const defaultPlatform = platformsData[0];
           setCatalogueData(prev => ({
             ...prev,
@@ -1603,42 +1598,72 @@ export default function AdminProductForm() {
     };
 
     fetchInitialData();
-  }, [toast]);
+  }, [toast, isEditing]);
 
-  // Pre-fill form from query parameters (when coming from Catalogues page)
+  // Pre-fill form from query parameters (when coming from Catalogues page - Add Color mode)
   useEffect(() => {
     if (isEditing || isLoadingData || platforms.length === 0) return;
     
     const catalogueId = searchParams.get('catalogue_id');
     const catalogueName = searchParams.get('catalogue_name');
     const platformId = searchParams.get('platform_id');
+    const platformSlug = searchParams.get('platform_slug');
     const gender = searchParams.get('gender');
-    const categoryId = searchParams.get('category_id');
+    const categoryIdsParam = searchParams.get('category_ids'); // Comma-separated IDs
     
-    if (catalogueId || catalogueName || platformId || gender || categoryId) {
-      setCatalogueData(prev => ({
-        ...prev,
-        ...(catalogueId && { articleId: parseInt(catalogueId) }),
-        ...(catalogueName && { article: decodeURIComponent(catalogueName), isNewArticle: false }),
-        ...(platformId && { platformId: parseInt(platformId) }),
-        ...(gender && { gender: gender }),
-        ...(categoryId && { categoryIds: [parseInt(categoryId)] }),
-      }));
-      
-      // Fetch the platform slug if platform_id is provided
-      if (platformId) {
-        const platform = platforms.find(p => p.id === parseInt(platformId));
-        if (platform) {
-          setCatalogueData(prev => ({ ...prev, platformSlug: platform.slug }));
-        }
-      }
+    if (!catalogueId && !catalogueName && !platformId && !platformSlug && !gender && !categoryIdsParam) {
+      return; // No query params, nothing to pre-fill
     }
-  }, [searchParams, isEditing, isLoadingData, platforms]);
+    
+    // Parse category IDs (comma-separated string to array of integers)
+    const categoryIds = categoryIdsParam 
+      ? categoryIdsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+      : [];
+    
+    // Find platform by ID or slug
+    let foundPlatform = null;
+    if (platformId) {
+      foundPlatform = platforms.find(p => p.id === parseInt(platformId));
+    }
+    if (!foundPlatform && platformSlug) {
+      foundPlatform = platforms.find(p => p.slug === platformSlug);
+    }
+    
+    setCatalogueData(prev => ({
+      ...prev,
+      ...(catalogueId && { articleId: parseInt(catalogueId) }),
+      ...(catalogueName && { article: decodeURIComponent(catalogueName), isNewArticle: false }),
+      ...(foundPlatform && { platformId: foundPlatform.id, platformSlug: foundPlatform.slug }),
+      ...(gender && { gender: gender }),
+      ...(categoryIds.length > 0 && { categoryIds: categoryIds }),
+    }));
+    
+    // If we're in add color mode and have a platform, fetch categories for that platform
+    if (isAddColorMode && foundPlatform) {
+      const fetchCategoriesForPlatform = async () => {
+        try {
+          const categoriesData = await AdminAPI.getCategories({
+            platformSlug: foundPlatform.slug,
+            isActive: true,
+            limit: 500,
+          });
+          setCategories(categoriesData || []);
+          categoriesLoadedInEditMode.current = true;
+        } catch (err) {
+          console.error('Failed to fetch categories for add color mode:', err);
+        }
+      };
+      fetchCategoriesForPlatform();
+    }
+  }, [searchParams, isEditing, isLoadingData, platforms, isAddColorMode]);
 
   // Load product data when editing
   useEffect(() => {
     const loadProductForEdit = async () => {
       if (!isEditing || !id || isLoadingData || platforms.length === 0) return;
+      
+      // Reset the ref at the start of loading
+      categoriesLoadedInEditMode.current = false;
       
       try {
         // Fetch product from list endpoint (has more data including media)
@@ -1663,26 +1688,20 @@ export default function AdminProductForm() {
           Object.assign(product || {}, singleProduct);
         }
 
-        console.log('Loaded product for edit:', product);
-        console.log('Product category_ids:', product.category_ids);
-
         // Get platform from platform_slug
         const platformSlug = product.platform_slug || 'footwear';
         const platform = platforms.find(p => p.slug === platformSlug);
         
-        // Fetch categories for the platform BEFORE setting categoryIds
-        let categoriesForPlatform = [];
-        if (platform?.id) {
-          try {
-            categoriesForPlatform = await AdminAPI.getCategories({
-              platformId: platform.id,
-              isActive: true,
-            });
-            console.log('Fetched categories for platform:', categoriesForPlatform);
-            setCategories(categoriesForPlatform || []);
-          } catch (err) {
-            console.error('Failed to fetch categories:', err);
-          }
+        // Fetch ALL categories in edit mode to ensure we have the product's categories
+        try {
+          const categoriesData = await AdminAPI.getCategories({
+            isActive: true,
+            limit: 500,
+          });
+          setCategories(categoriesData || []);
+          categoriesLoadedInEditMode.current = true;
+        } catch (err) {
+          console.error('Failed to fetch categories:', err);
         }
         
         // Fetch catalogue to get additional info
@@ -1695,6 +1714,31 @@ export default function AdminProductForm() {
           }
         }
 
+        // Fetch ALL categories for the platform so user can edit/add/remove categories
+        if (platform?.id) {
+          try {
+            const allCategories = await AdminAPI.getCategories({
+              platformId: platform.id,
+              isActive: true,
+              limit: 500,
+            });
+            setCategories(allCategories || []);
+            categoriesLoadedInEditMode.current = true;
+          } catch (err) {
+            console.error('Failed to fetch categories:', err);
+            // Fallback: use categories from product response
+            if (product.categories && product.categories.length > 0) {
+              setCategories(product.categories);
+            }
+          }
+        } else {
+          // If no platform found, use categories from product response
+          if (product.categories && product.categories.length > 0) {
+            setCategories(product.categories);
+            categoriesLoadedInEditMode.current = true;
+          }
+        }
+        
         // Set catalogue data with proper platform and category_ids
         setCatalogueData({
           article: product.catalogue_name || catalogue?.name || product.name || '',
@@ -1728,8 +1772,8 @@ export default function AdminProductForm() {
               sizeVariants[size] = {
                 mrp: variant.mrp_override || product.mrp || 0,
                 price: variant.price_override || product.price || product.mrp || 0,
-                stock: stock,
-                sku: variant.sku || generateSKU(product.name, product.color, size),
+                inventory: stock,  // Use 'inventory' to match SizeVariantRow expectations
+                skuId: variant.sku || '',  // Use 'skuId' to match SizeVariantRow expectations
               };
             }
           });
@@ -1762,28 +1806,6 @@ export default function AdminProductForm() {
           colorHex: product.color_hex || '',
           name: product.name || '',
           slug: product.slug || '',
-          sku: (() => {
-            // Extract base SKU by removing last 2 segments (color-size)
-            // Format: YOSTAR-HR-416-WHITE-7 -> YOSTAR-HR-416
-            const fullSku = product.variants?.[0]?.sku || '';
-            console.log('Full SKU from variant:', fullSku);
-            
-            if (!fullSku) return '';
-            
-            const parts = fullSku.split('-');
-            console.log('SKU parts:', parts);
-            console.log('Parts length:', parts.length);
-            
-            // Always remove last 2 parts (color and size)
-            if (parts.length > 2) {
-              const baseSku = parts.slice(0, -2).join('-');
-              console.log('Extracted base SKU:', baseSku);
-              return baseSku;
-            }
-            
-            console.log('SKU too short, returning as-is:', fullSku);
-            return fullSku;
-          })(),
           brandId: product.brand_id || product.brand?.id || null,
           brandName: product.brand?.name || product.brand_name || '',
           selectedSizes,
@@ -1822,14 +1844,8 @@ export default function AdminProductForm() {
         setProducts([editProduct]);
         setActiveProductTab('product-0');
 
-        // Populate catalogue data with category_ids
-        setCatalogueData({
-          article: product.catalogue_name || '',
-          articleId: product.catalogue_id || null,
-          gender: product.gender || 'unisex',
-          platformId: null, // Will be set when platforms load
-          categoryIds: product.category_ids || [],
-        });
+        // catalogueData is already set above with proper platform and categories
+        // Don't reset it here!
 
         toast({
           title: 'Product Loaded',
@@ -1848,9 +1864,15 @@ export default function AdminProductForm() {
     loadProductForEdit();
   }, [isEditing, id, isLoadingData, platforms, toast, navigate]);
 
-  // Fetch categories when platform changes
+  // Fetch categories when platform changes (ONLY in create mode, not edit or add color mode)
   useEffect(() => {
     const fetchCategories = async () => {
+      // In edit mode or add color mode, categories are loaded separately
+      if (isEditing || isAddColorMode) {
+        return;
+      }
+      
+      // Create mode only from here
       if (!catalogueData.platformId) {
         setCategories([]);
         return;
@@ -1869,7 +1891,7 @@ export default function AdminProductForm() {
     };
 
     fetchCategories();
-  }, [catalogueData.platformId]);
+  }, [catalogueData.platformId, isEditing, isAddColorMode]);
 
   // Fetch catalogues based on gender and category
   useEffect(() => {
@@ -1901,7 +1923,6 @@ export default function AdminProductForm() {
       colorHex: '',
       name: '',
       slug: '',
-      sku: '',
       brandId: null,
       brandName: '',
       selectedSizes: [],
@@ -2061,7 +2082,6 @@ export default function AdminProductForm() {
         const p = products[i];
         if (!p.color) throw new Error(`Product ${i + 1}: Please select a color`);
         if (!p.name) throw new Error(`Product ${i + 1}: Please enter a product name`);
-        if (!p.sku) throw new Error(`Product ${i + 1}: Please enter a base SKU`);
         if (!p.brandId) throw new Error(`Product ${i + 1}: Please select a brand`);
         if (p.selectedSizes.length === 0) {
           throw new Error(`Product ${i + 1}: Please select at least one size`);
@@ -2237,11 +2257,15 @@ export default function AdminProductForm() {
           // Build variants array
           const variants = product.selectedSizes.map(size => {
             const variant = product.sizeVariants[size];
-            // Generate proper SKU - ensure no empty parts or special chars
-            const baseSku = product.sku || generateSKU(catalogueData.article, product.color, '');
-            // Format color for SKU: "White/Grey" -> "WHITE-GREY"
-            const colorPart = product.color?.replace(/[^a-zA-Z0-9]/g, '-')?.replace(/-+/g, '-')?.replace(/^-|-$/g, '')?.toUpperCase() || '';
-            const variantSku = variant.skuId || (colorPart ? `${baseSku}-${colorPart}-${String(size).toUpperCase()}` : `${baseSku}-${String(size).toUpperCase()}`);
+            // Generate SKU: BRANDNAME-CATALOGUESLUG-COLOR-SIZE
+            // Example: NIKE-AIRJORDAN-WHITE-7
+            const brand = brands.find(b => b.id === product.brandId);
+            const brandPart = brand?.name?.replace(/[^a-zA-Z0-9]/g, '')?.toUpperCase() || 'BRAND';
+            const catalogueSlug = catalogueData.article?.replace(/[^a-zA-Z0-9]/g, '')?.toUpperCase() || 'PRODUCT';
+            const colorPart = product.color?.replace(/[^a-zA-Z0-9]/g, '')?.toUpperCase() || 'COLOR';
+            const sizePart = String(size).toUpperCase();
+            const variantSku = `${brandPart}-${catalogueSlug}-${colorPart}-${sizePart}`;
+            
             return {
               size: size,
               sku: variantSku.replace(/[^A-Z0-9-]/gi, '').toUpperCase(),
@@ -2450,32 +2474,48 @@ export default function AdminProductForm() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Platform */}
                     <div className="space-y-2">
-                      <Label>Platform *</Label>
-                      <Select
-                        value={catalogueData.platformId?.toString() || ''}
-                        onValueChange={(value) => handleCatalogueChange('platformId', parseInt(value))}
-                        disabled={isLoadingData || isEditing}
-                      >
-                        <SelectTrigger className="h-11">
-                          <SelectValue placeholder={isLoadingData ? 'Loading...' : 'Select platform'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {platforms.map((platform) => (
-                            <SelectItem key={platform.id} value={platform.id.toString()}>
-                              {platform.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label className="text-sm font-medium">Platform *</Label>
+                      {(isEditing || isAddColorMode) ? (
+                        /* In edit mode or add color mode, show platform as disabled input matching SelectTrigger style */
+                        <div className="h-11 w-full px-3 py-2 flex items-center justify-between rounded-md border border-input bg-background text-sm opacity-50 cursor-not-allowed">
+                          <span>
+                            {(() => {
+                              const platformName = platforms.find(p => p.id === catalogueData.platformId)?.name;
+                              if (platformName) return platformName;
+                              if (catalogueData.platformSlug) return catalogueData.platformSlug.charAt(0).toUpperCase() + catalogueData.platformSlug.slice(1);
+                              if (isLoadingData || platforms.length === 0) return 'Loading...';
+                              return 'Not set';
+                            })()}
+                          </span>
+                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        </div>
+                      ) : (
+                        <Select
+                          value={catalogueData.platformId?.toString() || ''}
+                          onValueChange={(value) => handleCatalogueChange('platformId', parseInt(value))}
+                          disabled={isLoadingData}
+                        >
+                          <SelectTrigger className="h-11">
+                            <SelectValue placeholder={isLoadingData ? 'Loading...' : 'Select platform'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {platforms.map((platform) => (
+                              <SelectItem key={platform.id} value={platform.id.toString()}>
+                                {platform.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
 
                     {/* Gender */}
                     <div className="space-y-2">
-                      <Label>Gender / Segment *</Label>
+                      <Label className="text-sm font-medium">Gender / Segment *</Label>
                       <Select
                         value={catalogueData.gender}
                         onValueChange={(value) => handleCatalogueChange('gender', value)}
-                        disabled={isEditing}
+                        disabled={isEditing || isAddColorMode}
                       >
                         <SelectTrigger className="h-11">
                           <SelectValue placeholder="Select gender" />
@@ -2492,7 +2532,7 @@ export default function AdminProductForm() {
 
                     {/* Article Selection or Creation */}
                     <div className="space-y-2">
-                      <Label>Article / Catalogue *</Label>
+                      <Label className="text-sm font-medium">Article / Catalogue *</Label>
                       <Select
                         value={catalogueData.articleId?.toString() || 'new'}
                         onValueChange={(value) => {
@@ -2502,7 +2542,7 @@ export default function AdminProductForm() {
                             handleCatalogueChange('articleId', parseInt(value));
                           }
                         }}
-                        disabled={isEditing}
+                        disabled={isEditing || isAddColorMode}
                       >
                         <SelectTrigger className="h-11">
                           <SelectValue placeholder="Select or create new" />
@@ -2516,7 +2556,7 @@ export default function AdminProductForm() {
                           ))}
                         </SelectContent>
                       </Select>
-                      {!catalogueData.articleId && !isEditing && (
+                      {!catalogueData.articleId && !isEditing && !isAddColorMode && (
                         <Input
                           value={catalogueData.article}
                           onChange={(e) => handleCatalogueChange('article', e.target.value)}
@@ -2528,24 +2568,20 @@ export default function AdminProductForm() {
                   </div>
 
                   {/* Categories (Dropdown with checkboxes - from API) */}
-                  <div className="space-y-3">
-                    <Label>Categories * (Select multiple)</Label>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Categories * (Select multiple)</Label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
                           role="combobox"
-                          className="w-full justify-between h-auto min-h-[42px] py-2"
-                          disabled={!catalogueData.platformId}
+                          className="w-full justify-between h-11 px-3 font-normal bg-background border-input hover:bg-accent/50 transition-colors"
+                          disabled={!isEditing && !isAddColorMode && !catalogueData.platformId}
                         >
-                          <span className="flex flex-wrap gap-1 text-left">
+                          <span className="flex flex-wrap gap-1 text-left overflow-hidden">
                             {catalogueData.categoryIds.length === 0 ? (
                               <span className="text-muted-foreground">
-                                {catalogueData.platformId ? 'Select categories...' : 'Select platform first'}
-                              </span>
-                            ) : categories.length === 0 ? (
-                              <span className="text-muted-foreground">
-                                Loading categories...
+                                {(isEditing || isAddColorMode || catalogueData.platformId) ? 'Select categories...' : 'Select platform first'}
                               </span>
                             ) : (
                               catalogueData.categoryIds.map(catId => {
@@ -2553,9 +2589,9 @@ export default function AdminProductForm() {
                                 return (
                                   <span 
                                     key={catId}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-sm"
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
                                   >
-                                    {cat?.name || `Category ID: ${catId}`}
+                                    {cat?.name || `Category ${catId}`}
                                   </span>
                                 );
                               })

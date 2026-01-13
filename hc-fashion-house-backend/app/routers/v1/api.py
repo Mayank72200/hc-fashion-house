@@ -17,6 +17,9 @@ from routers.v1.auth_router import router as auth_router
 # Order router
 from routers.v1.order_router import router as order_router
 
+# Site Configuration router
+from routers.v1.site_config import router as site_config_router
+
 # from auth import AzureAuth
 
 # azure_auth = AzureAuth()
@@ -67,3 +70,6 @@ api_router.include_router(media_store_router, tags=["Media Store"])
 
 # Order Routers (customer-facing order management)
 api_router.include_router(order_router, tags=["Orders"])
+
+# Site Configuration Router (Website Control Center)
+api_router.include_router(site_config_router, tags=["Site Configuration"])

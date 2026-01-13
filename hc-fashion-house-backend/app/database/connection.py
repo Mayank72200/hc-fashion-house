@@ -51,7 +51,9 @@ def init_db():
         Category, Catalogue, Product,
         ProductVariant, VariantOption, MediaAsset, FootwearDetails,
         Address, Order, OrderItem, ReturnRequest, ReturnRequestItem,
-        ContactSubmission
+        ContactSubmission,
+        # Site configuration models
+        BannerPlacement, FeaturedSection, MediaAssetLibrary, SiteSettings
     )
 
     # Create all tables (catalogue/product/order tables)
