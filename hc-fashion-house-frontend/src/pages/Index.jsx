@@ -270,14 +270,26 @@ const trendingCategories = [
 const trendingPhrases = [
   "Trending Now",
   "Hot Picks",
-  "Best Sellers",
-  "New Arrivals"
+  "Best Sellers"
 ];
 const trendingSubPhrases = [
   "Check out what's hot right now!",
   "Our most popular picks for you.",
-  "Top-rated products customers love.",
-  "Fresh styles just landed!"
+  "Top-rated products customers love."
+];
+
+// Rotating phrases for New Arrivals section
+const newArrivalsPhrases = [
+  "New Arrivals",
+  "Fresh Styles",
+  "Just Landed",
+  "Latest Drops"
+];
+const newArrivalsSubPhrases = [
+  "Be the first to step into the latest trends",
+  "Fresh styles just dropped for you",
+  "Brand new arrivals you'll love",
+  "Discover what's new this season"
 ];
 
 // Product rotation interval in milliseconds (8 seconds for slower transition)
@@ -292,8 +304,10 @@ export default function Index() {
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [activeCategory, setActiveCategory] = useState('all');
+  const [activeNewArrivalsCategory, setActiveNewArrivalsCategory] = useState('all');
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [trendingPhraseIndex, setTrendingPhraseIndex] = useState(0);
+  const [newArrivalsPhraseIndex, setNewArrivalsPhraseIndex] = useState(0);
   
   // Fetch brands from API
   const [brands, setBrands] = useState([]);
@@ -351,6 +365,14 @@ export default function Index() {
   useEffect(() => {
     const interval = setInterval(() => {
       setServiceHeadingIndex((prev) => (prev + 1) % serviceHeadings.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Rotate New Arrivals phrases
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNewArrivalsPhraseIndex((prev) => (prev + 1) % newArrivalsPhrases.length);
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -842,7 +864,7 @@ export default function Index() {
         whileInView={{ opacity: 1 }}
         viewport={{ once: true, margin: "-100px" }}
         transition={{ duration: 0.6 }}
-        className="container py-4 md:py-8"
+        className="container py-2 md:py-4"
       >
         {/* Top Divider Line */}
         <motion.div 
@@ -930,139 +952,171 @@ export default function Index() {
         </div>
       </motion.section>
 
-      {/* Trust Features Section */}
-      <section className="py-6 md:py-16 overflow-hidden">
+      {/* Shop by Style - Categories */}
+      <section className="pt-4 md:pt-8 pb-2 md:pb-4 bg-background">
         <div className="container">
-          {/* Top Divider Line */}
+          {/* Section Header */}
           <motion.div 
-            initial={{ scaleX: 0 }}
-            whileInView={{ scaleX: 1 }}
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
-            className="h-[2px] bg-foreground/40 mb-4 w-full"
-            style={{ transformOrigin: 'left' }}
-          />
-          
-          {/* Animated heading */}
-          <span className="relative h-[1.2em] overflow-hidden inline-flex items-center whitespace-nowrap min-w-[200px] font-display text-3xl lg:text-4xl font-bold text-left mb-4">
-            <AnimatePresence mode="wait">
-              <motion.span 
-                key={serviceHeadingIndex}
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -30, opacity: 0 }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                className="text-[hsl(var(--navy-blue))]"
-              >
-                {serviceHeadings[serviceHeadingIndex]}
-              </motion.span>
-            </AnimatePresence>
-          </span>
-          
-          {/* Bottom Divider Line */}
-          <motion.div 
-            initial={{ scaleX: 0 }}
-            whileInView={{ scaleX: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 1, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
-            className="h-[2px] bg-foreground/40 mt-0 mb-3 w-full"
-            style={{ transformOrigin: 'left' }}
-          />
-          
-          {/* Subheading */}
-          <span className="relative h-[1.2em] overflow-hidden inline-flex items-center whitespace-nowrap min-w-[180px] md:min-w-[300px] text-muted-foreground mt-1 mb-6">
-            <AnimatePresence mode="wait">
-              <motion.span 
-                key={serviceHeadingIndex}
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -30, opacity: 0 }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                className=""
-              >
-                {serviceHeadingIndex === 0 && "Trusted by thousands"}
-                {serviceHeadingIndex === 1 && "Hassle-free shopping"}
-                {serviceHeadingIndex === 2 && "Fast delivery & support"}
-              </motion.span>
-            </AnimatePresence>
-          </span>
-          
-          <div className="grid grid-cols-4 gap-2 md:gap-6">
+            transition={{ duration: 0.6 }}
+            className="text-center mb-6 md:mb-10"
+          >
+            <span className="text-gold font-medium text-sm md:text-base mb-2 block">Find Your Perfect Match</span>
+            <h2 className="font-display text-2xl md:text-4xl lg:text-5xl font-bold mb-3 text-foreground">
+              Shop by Style
+            </h2>
+            <p className="text-muted-foreground text-sm md:text-base max-w-2xl mx-auto">
+              Explore our curated collection of footwear designed for every occasion
+            </p>
+          </motion.div>
+
+          {/* Categories Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-6">
             {[
-              { 
-                icon: Truck, 
-                title: "Free Delivery", 
-                mobileTitle: "Free Ship",
-                description: "Free shipping all over India",
-                mobileDesc: "Pan India",
-                subtext: "Min. order ₹100",
-                mobileSubtext: "Min ₹100"
+              {
+                name: 'Sneakers',
+                image: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=500&q=80',
+                description: 'Urban & Athletic',
+                gradient: 'from-blue-500/20 to-purple-500/20',
+                icon: '👟'
               },
-              { 
-                icon: Headset, 
-                title: "24/7 Support", 
-                mobileTitle: "24/7 Help",
-                description: "Always here to help you",
-                mobileDesc: "Anytime",
-                subtext: "Call, chat or email anytime",
-                mobileSubtext: "Call/Chat"
+              {
+                name: 'Casual',
+                image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=500&q=80',
+                description: 'Everyday Comfort',
+                gradient: 'from-green-500/20 to-teal-500/20',
+                icon: '🥿'
               },
-              { 
-                icon: ShieldCheck, 
-                title: "Easy Returns", 
-                mobileTitle: "Returns",
-                description: "72-hour hassle-free returns",
-                mobileDesc: "72 Hours",
-                subtext: "For wrong item, size or damage",
-                mobileSubtext: "If issues"
+              {
+                name: 'Formal',
+                image: 'https://images.unsplash.com/photo-1614252369475-531eba835eb1?w=500&q=80',
+                description: 'Classic Elegance',
+                gradient: 'from-gray-500/20 to-slate-500/20',
+                icon: '👞'
               },
-              { 
-                icon: CreditCard, 
-                title: "Secure Payments", 
-                mobileTitle: "Secure Pay",
-                description: "100% encrypted transactions",
-                mobileDesc: "100% Safe",
-                subtext: "All major cards & UPI accepted",
-                mobileSubtext: "Cards & UPI"
+              {
+                name: 'Sports',
+                image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80',
+                description: 'Performance Driven',
+                gradient: 'from-red-500/20 to-orange-500/20',
+                icon: '⚽'
+              },
+              {
+                name: 'Sandals',
+                image: 'https://images.unsplash.com/photo-1603487742131-4160ec999306?w=500&q=80',
+                description: 'Summer Essentials',
+                gradient: 'from-yellow-500/20 to-amber-500/20',
+                icon: '🩴'
+              },
+              {
+                name: 'Boots',
+                image: 'https://images.unsplash.com/photo-1608256246200-53e635b5b65f?w=500&q=80',
+                description: 'Bold & Rugged',
+                gradient: 'from-amber-500/20 to-brown-500/20',
+                icon: '🥾'
+              },
+              {
+                name: 'Loafers',
+                image: 'https://images.unsplash.com/photo-1533867617858-e7b97e060509?w=500&q=80',
+                description: 'Sophisticated Style',
+                gradient: 'from-indigo-500/20 to-violet-500/20',
+                icon: '👟'
+              },
+              {
+                name: 'Slippers',
+                image: 'https://images.unsplash.com/photo-1585664811087-47f65abbad64?w=500&q=80',
+                description: 'Home Comfort',
+                gradient: 'from-pink-500/20 to-rose-500/20',
+                icon: '🥿'
               }
-            ].map((feature, index) => (
+            ].map((category, index) => (
               <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 20 }}
+                key={category.name}
+                initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: index * 0.1, duration: 0.5 }}
-                className="group animated-border-card bg-card p-2 md:p-6 text-center cursor-pointer"
               >
-                <div className="relative z-10">
-                  <motion.div 
-                    className="w-10 h-10 md:w-16 md:h-16 mx-auto mb-2 md:mb-4 rounded-full bg-white dark:bg-white/10 border border-[#C9A24D]/30 flex items-center justify-center group-hover:bg-[#C9A24D]/10 transition-colors duration-300"
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                  >
-                    <feature.icon className="w-5 h-5 md:w-8 md:h-8 text-[#C9A24D] group-hover:scale-110 transition-transform duration-300" strokeWidth={1.5} />
-                  </motion.div>
-                  <h3 className="font-semibold text-[9px] md:text-lg mb-0.5 md:mb-2 group-hover:text-[#C9A24D] transition-colors duration-300 whitespace-nowrap">
-                    <span className="hidden md:inline">{feature.title}</span>
-                    <span className="md:hidden">{feature.mobileTitle}</span>
-                  </h3>
-                  <p className="text-muted-foreground text-[7px] md:text-sm group-hover:text-muted-foreground/80 transition-colors duration-300 whitespace-nowrap">
-                    <span className="hidden md:inline">{feature.description}</span>
-                    <span className="md:hidden">{feature.mobileDesc}</span>
-                  </p>
-                  <p className="text-muted-foreground/70 text-[6px] md:text-xs mt-0.5 md:mt-1 group-hover:text-muted-foreground/60 transition-colors duration-300 whitespace-nowrap">
-                    <span className="hidden md:inline">{feature.subtext}</span>
-                    <span className="md:hidden">{feature.mobileSubtext}</span>
-                  </p>
-                </div>
+                <Link 
+                  to={`/products?category=${category.name.toLowerCase()}`}
+                  className="group block relative h-40 md:h-64 rounded-xl md:rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500"
+                >
+                  {/* Background Image */}
+                  <div className="absolute inset-0">
+                    <img 
+                      src={category.image} 
+                      alt={category.name}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    />
+                    {/* Gradient Overlay */}
+                    <div className={`absolute inset-0 bg-gradient-to-br ${category.gradient} opacity-40 group-hover:opacity-30 transition-opacity duration-500`} />
+                    {/* Dark Overlay */}
+                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-colors duration-500" />
+                  </div>
+
+                  {/* Content */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-3 md:p-6 text-center">
+                    {/* Icon */}
+                    <motion.span 
+                      className="text-3xl md:text-5xl mb-2 md:mb-3 filter drop-shadow-lg"
+                      whileHover={{ scale: 1.2, rotate: 10 }}
+                      transition={{ type: "spring", stiffness: 300 }}
+                    >
+                      {category.icon}
+                    </motion.span>
+                    
+                    {/* Category Name */}
+                    <h3 className="font-display text-lg md:text-2xl lg:text-3xl font-bold text-white drop-shadow-lg mb-1 md:mb-2">
+                      {category.name}
+                    </h3>
+                    
+                    {/* Description */}
+                    <p className="text-white/90 text-xs md:text-sm font-medium drop-shadow-md opacity-0 group-hover:opacity-100 transition-opacity duration-500 transform translate-y-2 group-hover:translate-y-0">
+                      {category.description}
+                    </p>
+
+                    {/* Explore Button */}
+                    <motion.div
+                      className="mt-2 md:mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                      initial={{ y: 10 }}
+                      whileHover={{ y: 0 }}
+                    >
+                      <span className="inline-flex items-center gap-1 md:gap-2 text-xs md:text-sm font-semibold text-white bg-[#C9A24D] px-3 md:px-4 py-1 md:py-2 rounded-full shadow-lg">
+                        Explore
+                        <ArrowRight className="w-3 h-3 md:w-4 md:h-4" />
+                      </span>
+                    </motion.div>
+                  </div>
+
+                  {/* Hover Border Effect */}
+                  <div className="absolute inset-0 border-2 border-transparent group-hover:border-[#C9A24D] rounded-xl md:rounded-2xl transition-colors duration-500" />
+                </Link>
               </motion.div>
             ))}
           </div>
+
+          {/* View All Categories Link */}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.5 }}
+            className="flex justify-center mt-4 md:mt-6"
+          >
+            <Link to="/products">
+              <Button className="gap-2 bg-[#C9A24D] hover:bg-[#B8933E] text-white font-medium px-6 md:px-8 py-5 md:py-6 text-sm md:text-base shadow-lg">
+                View All Products
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+          </motion.div>
         </div>
       </section>
 
       {/* Featured Products - Trending Now */}
-      <section className="bg-gradient-to-b from-accent/5 via-background to-background py-0 md:py-16">
+      <section className="bg-background pt-2 md:pt-4 pb-2 md:pb-4">
         <div className="container">
           {/* Top Divider Line */}
           <motion.div 
@@ -1209,11 +1263,354 @@ export default function Index() {
           {/* View All Link */}
           <div className="flex justify-center mt-10">
             <Link to="/products">
-              <Button variant="outline" size="lg" className="gap-2 px-8">
+              <Button className="gap-2 bg-[#C9A24D] hover:bg-[#B8933E] text-white font-medium px-6 md:px-8 py-5 md:py-6 text-sm md:text-base shadow-lg">
                 View All Products
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* New Arrivals Section */}
+      <section className="bg-background pt-2 md:pt-4 pb-6 md:pb-12">
+        <div className="container">
+          {/* Top Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mb-4 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+          
+          {/* Animated Heading */}
+          <motion.h2 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+            className="font-display text-3xl lg:text-4xl font-bold text-left mb-4"
+          >
+            <span className="relative h-[1.2em] overflow-hidden inline-flex items-center whitespace-nowrap min-w-[240px] md:min-w-[450px]">
+              <span className="animate-pulse mr-3">🆕</span>
+              <AnimatePresence mode="wait">
+                <motion.span 
+                  key={newArrivalsPhraseIndex}
+                  initial={{ y: 30, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -30, opacity: 0 }}
+                  transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                  className="absolute left-12 text-[hsl(var(--navy-blue))]"
+                >
+                  {newArrivalsPhrases[newArrivalsPhraseIndex]}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+          </motion.h2>
+          
+          {/* Bottom Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mt-0 mb-3 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+          
+          <p className="text-muted-foreground mt-1 mb-4">{newArrivalsSubPhrases[newArrivalsPhraseIndex]}</p>
+
+          {/* Category Pills */}
+          <div className="flex justify-center gap-2 mb-8 flex-wrap">
+            {['All', 'Men', 'Women', 'Kids'].map((category, index) => (
+              <motion.button
+                key={category}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
+                onClick={() => setActiveNewArrivalsCategory(category.toLowerCase())}
+                className={`px-4 py-2 rounded-full border transition-all duration-300 text-sm font-medium ${
+                  activeNewArrivalsCategory === category.toLowerCase()
+                    ? 'bg-[#1C1C1C] text-white border-[#1C1C1C] shadow-md dark:bg-white dark:text-[#1C1C1C] dark:border-white'
+                    : 'bg-card border-border hover:border-[#C9A24D] hover:bg-[#C9A24D]/10'
+                }`}
+              >
+                {category}
+              </motion.button>
+            ))}
+          </div>
+
+          {/* Products Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+            {allFeaturedProducts.slice(0, 8).map((product, index) => (
+              <motion.div
+                key={product.id}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <FlipCard product={product} size="small" index={index} />
+              </motion.div>
+            ))}
+          </div>
+
+          {/* View All Button */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            className="flex justify-center mt-8 md:mt-12"
+          >
+            <Link to="/products?filter=new-arrivals">
+              <Button className="gap-2 bg-[#C9A24D] hover:bg-[#B8933E] text-white font-medium px-6 md:px-8 py-5 md:py-6 text-sm md:text-base shadow-lg">
+                Explore All New Arrivals
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Sale Section - Heavy Discounts */}
+      <section className="bg-background pt-2 md:pt-4 pb-6 md:pb-12 relative overflow-hidden">
+        <div className="container relative z-10">
+          {/* Top Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mb-4 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+
+          {/* Section Header */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            {/* Left side - Heading */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+            >
+              <motion.h2 
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+                className="font-display text-3xl lg:text-4xl font-bold text-left mb-2"
+              >
+                <span className="text-red-600">Mega</span> Sale
+              </motion.h2>
+              <p className="text-muted-foreground text-sm md:text-base">Grab amazing deals before they're gone!</p>
+            </motion.div>
+
+            {/* Right side - Sale Badge */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="flex flex-col sm:flex-row items-start sm:items-center gap-3"
+            >
+              <div className="inline-flex items-center gap-2 bg-red-600 text-white px-4 md:px-6 py-2 md:py-3 rounded-full font-bold text-base md:text-xl shadow-xl">
+                <span className="text-xl md:text-2xl">🔥</span>
+                UPTO 70% OFF
+                <span className="text-xl md:text-2xl">🔥</span>
+              </div>
+              <div className="inline-flex items-center gap-2 bg-card px-4 py-2 rounded-full border border-red-200 dark:border-red-800">
+                <span className="font-semibold text-xs md:text-sm">⏰ Limited Time</span>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Bottom Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mt-0 mb-6 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+
+          {/* Sale Products Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
+            {allFeaturedProducts.slice(0, 8).map((product, index) => (
+              <motion.div
+                key={product.id}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.08 }}
+                className="relative group"
+              >
+                {/* Discount Badge */}
+                <div className="absolute -top-2 -right-2 z-20 bg-red-600 text-white px-2.5 py-1 rounded-full text-xs md:text-sm font-bold shadow-lg transform rotate-12 group-hover:rotate-0 transition-transform duration-300">
+                  30% OFF
+                </div>
+                
+                {/* Product Card */}
+                <div className="relative rounded-xl overflow-hidden border-2 border-transparent group-hover:border-red-500 transition-all duration-300">
+                  <FlipCard product={product} size="small" index={index} />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Sale CTA */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="flex flex-col sm:flex-row justify-center items-center gap-4"
+          >
+            <Link to="/products?filter=on-sale">
+              <Button className="gap-2 bg-red-600 hover:bg-red-700 text-white font-bold px-8 md:px-10 py-5 md:py-6 text-base md:text-lg shadow-lg">
+                <span className="text-lg md:text-xl">🎯</span>
+                Shop All Sale Items
+                <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+              </Button>
+            </Link>
+            <div className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground">
+              <ShieldCheck className="w-4 h-4 text-green-600" />
+              <span>Best Price Guaranteed</span>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Trust Features Section */}
+      <section className="py-6 md:py-16 overflow-hidden">
+        <div className="container">
+          {/* Top Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mb-4 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+          
+          {/* Animated heading */}
+          <span className="relative h-[1.2em] overflow-hidden inline-flex items-center whitespace-nowrap min-w-[200px] font-display text-3xl lg:text-4xl font-bold text-left mb-4">
+            <AnimatePresence mode="wait">
+              <motion.span 
+                key={serviceHeadingIndex}
+                initial={{ y: 30, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -30, opacity: 0 }}
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="text-[hsl(var(--navy-blue))]"
+              >
+                {serviceHeadings[serviceHeadingIndex]}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          
+          {/* Bottom Divider Line */}
+          <motion.div 
+            initial={{ scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="h-[2px] bg-foreground/40 mt-0 mb-3 w-full"
+            style={{ transformOrigin: 'left' }}
+          />
+          
+          {/* Subheading */}
+          <span className="relative h-[1.2em] overflow-hidden inline-flex items-center whitespace-nowrap min-w-[180px] md:min-w-[300px] text-muted-foreground mt-1 mb-6">
+            <AnimatePresence mode="wait">
+              <motion.span 
+                key={serviceHeadingIndex}
+                initial={{ y: 30, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -30, opacity: 0 }}
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className=""
+              >
+                {serviceHeadingIndex === 0 && "Trusted by thousands"}
+                {serviceHeadingIndex === 1 && "Hassle-free shopping"}
+                {serviceHeadingIndex === 2 && "Fast delivery & support"}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          
+          <div className="grid grid-cols-4 gap-2 md:gap-6">
+            {[
+              { 
+                icon: Truck, 
+                title: "Free Delivery", 
+                mobileTitle: "Free Ship",
+                description: "Free shipping all over India",
+                mobileDesc: "Pan India",
+                subtext: "Min. order ₹100",
+                mobileSubtext: "Min ₹100"
+              },
+              { 
+                icon: Headset, 
+                title: "24/7 Support", 
+                mobileTitle: "24/7 Help",
+                description: "Always here to help you",
+                mobileDesc: "Anytime",
+                subtext: "Call, chat or email anytime",
+                mobileSubtext: "Call/Chat"
+              },
+              { 
+                icon: ShieldCheck, 
+                title: "Easy Returns", 
+                mobileTitle: "Returns",
+                description: "72-hour hassle-free returns",
+                mobileDesc: "72 Hours",
+                subtext: "For wrong item, size or damage",
+                mobileSubtext: "If issues"
+              },
+              { 
+                icon: CreditCard, 
+                title: "Secure Payments", 
+                mobileTitle: "Secure Pay",
+                description: "100% encrypted transactions",
+                mobileDesc: "100% Safe",
+                subtext: "All major cards & UPI accepted",
+                mobileSubtext: "Cards & UPI"
+              }
+            ].map((feature, index) => (
+              <motion.div
+                key={feature.title}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1, duration: 0.5 }}
+                className="group animated-border-card bg-card p-2 md:p-6 text-center cursor-pointer"
+              >
+                <div className="relative z-10">
+                  <motion.div 
+                    className="w-10 h-10 md:w-16 md:h-16 mx-auto mb-2 md:mb-4 rounded-full bg-white dark:bg-white/10 border border-[#C9A24D]/30 flex items-center justify-center group-hover:bg-[#C9A24D]/10 transition-colors duration-300"
+                    whileHover={{ scale: 1.1, rotate: 5 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                  >
+                    <feature.icon className="w-5 h-5 md:w-8 md:h-8 text-[#C9A24D] group-hover:scale-110 transition-transform duration-300" strokeWidth={1.5} />
+                  </motion.div>
+                  <h3 className="font-semibold text-[9px] md:text-lg mb-0.5 md:mb-2 group-hover:text-[#C9A24D] transition-colors duration-300 whitespace-nowrap">
+                    <span className="hidden md:inline">{feature.title}</span>
+                    <span className="md:hidden">{feature.mobileTitle}</span>
+                  </h3>
+                  <p className="text-muted-foreground text-[7px] md:text-sm group-hover:text-muted-foreground/80 transition-colors duration-300 whitespace-nowrap">
+                    <span className="hidden md:inline">{feature.description}</span>
+                    <span className="md:hidden">{feature.mobileDesc}</span>
+                  </p>
+                  <p className="text-muted-foreground/70 text-[6px] md:text-xs mt-0.5 md:mt-1 group-hover:text-muted-foreground/60 transition-colors duration-300 whitespace-nowrap">
+                    <span className="hidden md:inline">{feature.subtext}</span>
+                    <span className="md:hidden">{feature.mobileSubtext}</span>
+                  </p>
+                </div>
+              </motion.div>
+            ))}
           </div>
         </div>
       </section>
