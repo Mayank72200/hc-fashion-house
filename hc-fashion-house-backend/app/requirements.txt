@@ -19,7 +19,7 @@ python-jose[cryptography]
 
 # Configuration & Data Validation
 python-dotenv
-pydantic
+pydantic[email]  # email extra required by order_models EmailStr fields
 pydantic-settings
 
 # Networking & Async

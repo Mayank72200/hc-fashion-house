@@ -26,6 +26,9 @@ from routers.v1.auth_router import router as auth_router
 # Site Configuration router (Website Control Center)
 from routers.v1.site_config import router as site_config_router
 
+# Order router (orders, addresses, returns, contact)
+from routers.v1.order_router import router as order_router
+
 from utils.exceptions import EcommerceException
 
 # Define allowed origins
@@ -173,6 +176,11 @@ app.include_router(media_store_router, prefix="/api/v1", tags=["Media Store"])
 # Site Configuration Router (Website Control Center)
 # ========================
 app.include_router(site_config_router, prefix="/api/v1", tags=["Site Configuration"])
+
+# ========================
+# Order Router (orders, addresses, returns, contact)
+# ========================
+app.include_router(order_router, prefix="/api/v1", tags=["Orders"])
 
 
 if __name__ == "__main__":

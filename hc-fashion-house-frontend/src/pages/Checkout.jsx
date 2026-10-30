@@ -104,7 +104,7 @@ export default function Checkout() {
           size: item.selectedSize?.ind || item.selectedSize?.uk?.toString() || 'One Size',
           color: item.selectedColor || null,
           quantity: item.quantity,
-          unit_price: item.price * 100, // Convert to paise
+          unit_price: item.price, // Rupees — backend shipping/total logic is rupee-based
           image_url: item.image,
         })),
         

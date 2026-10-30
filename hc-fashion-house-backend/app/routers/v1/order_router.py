@@ -38,7 +38,7 @@ async def create_order(
     Supports both authenticated users and guest checkout.
     All orders are prepaid only.
     """
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user.user_id if current_user else None
     
     # Guest checkout requires guest info
     if not user_id and not order_data.guest_info:
@@ -63,7 +63,7 @@ async def list_orders(
     List orders for the authenticated user.
     """
     orders, total = OrderService.list_orders(
-        db, current_user["id"], status, page, per_page
+        db, current_user.user_id, status, page, per_page
     )
     
     return OrderListResponse(
@@ -84,7 +84,7 @@ async def get_order(
     """
     Get order details by ID.
     """
-    order = OrderService.get_order(db, order_id, current_user["id"])
+    order = OrderService.get_order(db, order_id, current_user.user_id)
     return OrderResponse.model_validate(order)
 
 
@@ -118,7 +118,7 @@ async def track_order_by_id(
     Get tracking details for an order by ID.
     Requires authentication - user must own the order.
     """
-    order = OrderService.get_order(db, order_id, current_user["id"])
+    order = OrderService.get_order(db, order_id, current_user.user_id)
     
     return OrderService.get_order_tracking(
         db,
@@ -140,7 +140,7 @@ async def create_address(
     """
     Create a new address for the authenticated user.
     """
-    address = AddressService.create_address(db, current_user["id"], address_data)
+    address = AddressService.create_address(db, current_user.user_id, address_data)
     return AddressResponse.model_validate(address)
 
 
@@ -152,7 +152,7 @@ async def list_addresses(
     """
     List all addresses for the authenticated user.
     """
-    addresses = AddressService.list_addresses(db, current_user["id"])
+    addresses = AddressService.list_addresses(db, current_user.user_id)
     return [AddressResponse.model_validate(a) for a in addresses]
 
 
@@ -165,7 +165,7 @@ async def get_address(
     """
     Get an address by ID.
     """
-    address = AddressService.get_address(db, address_id, current_user["id"])
+    address = AddressService.get_address(db, address_id, current_user.user_id)
     return AddressResponse.model_validate(address)
 
 
@@ -180,7 +180,7 @@ async def update_address(
     Update an address.
     """
     address = AddressService.update_address(
-        db, address_id, current_user["id"], address_data
+        db, address_id, current_user.user_id, address_data
     )
     return AddressResponse.model_validate(address)
 
@@ -194,7 +194,7 @@ async def delete_address(
     """
     Delete an address.
     """
-    AddressService.delete_address(db, address_id, current_user["id"])
+    AddressService.delete_address(db, address_id, current_user.user_id)
     return {"message": "Address deleted successfully"}
 
 
@@ -213,7 +213,7 @@ async def create_return_request(
     Returns must be requested within 72 hours of delivery.
     Products approved during video call packing are not eligible.
     """
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user.user_id if current_user else None
     
     return_request = ReturnService.create_return_request(db, user_id, return_data)
     
