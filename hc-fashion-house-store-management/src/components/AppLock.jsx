@@ -41,16 +41,17 @@ function LockScreen({ length, onUnlock }) {
   return (
     <div className="app-lock-screen">
       <form className="glass-panel app-lock-card" onSubmit={(e) => { e.preventDefault(); if (pin.length === length) submit(pin); }}>
+        <img src="/brand/hc-badge-256.png" width={96} height={96} alt="" />
         <Lock size={32} aria-hidden="true" />
         <h1>Enter your PIN</h1>
-        <p className="text-muted">Free GST Billing is locked.</p>
+        <p className="text-muted">HC Fashion House is locked.</p>
         <input ref={input} className="form-input app-lock-input" type="password" inputMode="numeric" autoComplete="off" autoFocus
           aria-label={`${length} digit PIN`} placeholder={'•'.repeat(length)} value={pin} onChange={onChange} disabled={busy} maxLength={length} />
         <p className="app-lock-error" role="alert">{error}</p>
         <button type="button" className="app-lock-link" onClick={() => setShowHelp((v) => !v)}>Forgot PIN?</button>
         {showHelp && (
           <p className="app-lock-help">
-            Open the Free-GST-Billing folder on this PC (where you start the app), make a new text file there named <strong>RESET-PIN</strong>, then reload this page. The PIN is removed and the file deleted. Your invoices are not touched.
+            Open the folder on this PC that holds the HC Fashion House launcher (where you start the app), make a new text file there named <strong>RESET-PIN</strong>, then reload this page. The PIN is removed and the file deleted. Your invoices are not touched.
           </p>
         )}
       </form>

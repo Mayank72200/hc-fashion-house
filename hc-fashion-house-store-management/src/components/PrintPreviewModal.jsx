@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Printer, Download, Loader, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Printer, Download, Loader, ZoomIn, ZoomOut, CloudUpload } from 'lucide-react';
 import InvoicePreview from './InvoicePreview';
 import { getPaperSize } from '../utils';
 
@@ -27,7 +27,7 @@ import { getPaperSize } from '../utils';
 // are the same. No CSS drift risk.
 
 export default function PrintPreviewModal({
-  isOpen, onClose, onPrint, onDownloadPdf,
+  isOpen, onClose, onPrint, onDownloadPdf, onSaveToDrive,
   profile, client, details, items, totals, invoiceType,
   customTerms, customNotes, extraSections, invoiceOptions, cancelled = false,
 }) {
@@ -80,6 +80,20 @@ export default function PrintPreviewModal({
       onClose?.();
       await new Promise(r => requestAnimationFrame(() => setTimeout(r, 20)));
       await onDownloadPdf?.();
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  // Save to Drive: passed only when Google Drive is set up. Same hand-over as
+  // Download PDF; the parent saves, builds the PDF and uploads it.
+  const handleSaveToDrive = async () => {
+    if (printing) return;
+    setPrinting(true);
+    try {
+      onClose?.();
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 20)));
+      await onSaveToDrive?.();
     } finally {
       setPrinting(false);
     }
@@ -193,6 +207,14 @@ export default function PrintPreviewModal({
               style={{ fontSize: '0.85rem', padding: '0.5rem 0.9rem' }}
               title="Save as PDF instead">
               <Download size={15} /> Download PDF
+            </button>
+          )}
+          {onSaveToDrive && (
+            <button type="button" className="btn btn-secondary"
+              onClick={handleSaveToDrive} disabled={printing}
+              style={{ fontSize: '0.85rem', padding: '0.5rem 0.9rem' }}
+              title="Save the invoice and upload its PDF to your own Google Drive">
+              <CloudUpload size={15} /> Save to Drive
             </button>
           )}
           <button type="button" className="btn btn-secondary"

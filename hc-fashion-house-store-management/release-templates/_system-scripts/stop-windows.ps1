@@ -1,30 +1,44 @@
-# Free GST Billing - Windows stop-server.
+# HC Fashion House - Windows stop-server.
 #
-# Finds any node.exe process listening on our port and kills it.
-# Safe if nothing is running (no error, quick exit).
+# Stops this app's server: the node.exe from this copy's _system\node that
+# listens on the app's port. Any other program on that port is left alone.
+# Safe if nothing is running (no error, quick exit). After a successful stop
+# data\port.run is deleted (Stop-HcfhServer in hcfh-paths.ps1): the forced
+# stop skips the server's own clean-up of that file.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Host.UI.RawUI.WindowTitle = 'Free GST Billing - Stop Server'
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$portFile = Join-Path $ScriptDir 'data\port.txt'
-$port = 47371
-if (Test-Path $portFile) {
-  $p = (Get-Content $portFile -Raw).Trim()
-  if ($p -match '^\d+$') { $port = [int]$p }
+$helper = Join-Path $PSScriptRoot 'hcfh-paths.ps1'
+if (-not (Test-Path -LiteralPath $helper)) {
+  Write-Host '  Missing file: hcfh-paths.ps1. Reinstall from the HC Fashion House ZIP.' -ForegroundColor Red
+  exit 1
 }
+. $helper
+Set-HcfhTitle 'HC Fashion House - Stop Server'
 
-$conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-if (-not $conn) {
-  Write-Host "  Server is not running on port $port."
-  Start-Sleep 1
-  exit 0
-}
+if (-not (Test-HcfhReleaseLayout -AllowHcfhHome)) { exit 1 }
 
-$owningPid = $conn | Select-Object -ExpandProperty OwningProcess -First 1
-if ($owningPid) {
-  Stop-Process -Id $owningPid -Force
-  Write-Host "  Stopped server on port $port (PID $owningPid)."
+$port = Get-HcfhPort
+$result = Stop-HcfhServer -Port $port
+$code = 0
+switch ($result.State) {
+  'not-running' {
+    Write-Host "  Server is not running on port $port."
+  }
+  'stopped' {
+    Write-Host "  Stopped server on port $port (PID $($result.Pid))."
+  }
+  'not-ours' {
+    Write-Host "  Port $port is used by another program ($($result.Name), PID $($result.Pid))," -ForegroundColor Yellow
+    Write-Host '  not by HC Fashion House, so it was left running.' -ForegroundColor Yellow
+    $code = 1
+  }
+  default {
+    Write-Host "  Could not stop the server on port $port." -ForegroundColor Red
+    Write-Host "  Restart the PC to stop it. $HcfhContactLine"
+    $code = 1
+  }
 }
+if ($code -ne 0) { Wait-HcfhEnter }
 Start-Sleep 1
-exit 0
+exit $code

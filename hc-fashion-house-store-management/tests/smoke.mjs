@@ -11,42 +11,142 @@
  *
  * Two of them (ERR-004, ERR-007) reproduce ONLY in Firefox, so this runs
  * Firefox deliberately. Testing in Chrome alone is what let them ship.
+ * SMOKE_BROWSER=msedge runs the installed Microsoft Edge (the shop's
+ * browser) through Playwright's Chromium driver instead, for a machine where
+ * Playwright's own Firefox cannot be installed. Firefox stays the default.
  *
  * The rule when adding to this file: a test earns its place by having
  * FAILED against the build that shipped the bug. A test that never went
  * red is decoration.
  *
  * Usage:
- *   npm test              # starts a server on a free port, runs, cleans up
- *   APP_URL=... npm test  # run against an already-running instance
+ *   npm test              # starts a server on a free port with a fresh,
+ *                         # temporary data folder (HCFH_HOME), runs, cleans up
+ *   APP_URL=... npm test  # run against an already-running instance. Refused
+ *                         # unless that instance keeps its data in a temporary
+ *                         # folder: the suite edits the books it runs against.
+ *                         # HCFH_ALLOW_LIVE=1 overrides; never use it on real books.
+ *   SMOKE_BROWSER=msedge npm test   # the same suite in Microsoft Edge
  */
-import { firefox } from 'playwright';
+import { chromium, firefox } from 'playwright';
 import { spawn } from 'child_process';
+import { get as httpGet } from 'http';
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { isAbsolute, join, resolve, sep } from 'path';
+import { fileURLToPath } from 'url';
 import { PDFDocument } from 'pdf-lib';
 import { setTimeout as sleep } from 'timers/promises';
 
+// The browser the suite drives: Firefox unless SMOKE_BROWSER says otherwise.
+const BROWSERS = {
+  firefox: { name: 'Firefox', launch: () => firefox.launch({ headless: true }) },
+  msedge: { name: 'Microsoft Edge', launch: () => chromium.launch({ channel: 'msedge', headless: true }) },
+};
+const SMOKE_BROWSER = String(process.env.SMOKE_BROWSER || 'firefox').trim().toLowerCase();
+
 const results = [];
 let serverProc = null;
+let serverErr = '';
+// The temporary data folder of the server this suite starts (null with APP_URL).
+let smokeHome = null;
+const APP_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const check = (name, pass, detail = '') => {
   results.push({ name, pass, detail });
   console.log(`  ${pass ? '✓' : '✗'} ${name}${detail ? `  — ${detail}` : ''}`);
 };
 
-/** Boot the app unless the caller pointed us at a running one. */
+/** True when `p` is inside the OS temporary folder (case-insensitive, either spelling of it). */
+function isUnderTemp(p) {
+  const real = (x) => { try { return realpathSync.native(x); } catch { return x; } };
+  const norm = (x) => resolve(x).toLowerCase().replace(/[\\/]+$/, '') + sep;
+  const roots = [tmpdir(), real(tmpdir())].map(norm);
+  return [p, real(p)].map(norm).some((x) => roots.some((r) => x.startsWith(r)));
+}
+
+/**
+ * The suite creates and edits records, burns invoice numbers and changes
+ * settings in whatever books it runs against. An instance we did not start is
+ * therefore used only when the server says its data folder is a temporary
+ * one, as verify-release's freshly extracted package is.
+ */
+async function refuseLiveData(url) {
+  if (process.env.HCFH_ALLOW_LIVE === '1') return;
+  const st = await fetch(new URL('/api/control-panel/status', url))
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const folder = typeof st?.dataFolder === 'string' ? st.dataFolder : '';
+  if (st?.dataFolderIsTemp === true || (isAbsolute(folder) && isUnderTemp(folder))) return;
+  throw new Error(`APP_URL ${url} keeps its data in ${folder || 'an unknown folder'}, not a temporary one. `
+    + 'The suite would edit those books, so it refuses. Point it at a copy, or set HCFH_ALLOW_LIVE=1 (never on real books).');
+}
+
+/**
+ * Boot the app unless the caller pointed us at a running one. Our own server
+ * gets a fresh temporary data folder (HCFH_HOME), so a run never reads or
+ * changes the books, PDFs, Trash or port.txt of a real install.
+ */
 async function startServer() {
-  if (process.env.APP_URL) return process.env.APP_URL;
-  serverProc = spawn(process.execPath, ['server.js'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (process.env.APP_URL) {
+    await refuseLiveData(process.env.APP_URL);
+    return process.env.APP_URL;
+  }
+  smokeHome = mkdtempSync(join(tmpdir(), 'hcfh-smoke-'));
+  const env = { ...process.env, HCFH_HOME: smokeHome };
+  delete env.HCFH_EGRESS; // the egress guard blocks by default; a log-only switch has no place in the gate
+  serverProc = spawn(process.execPath, [join(APP_ROOT, 'server.js')], { cwd: APP_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Always drained: a full stderr pipe would stall the server mid-run.
+  serverProc.stderr.on('data', (d) => { serverErr = (serverErr + d).slice(-4000); });
+  const tail = () => (serverErr.trim() ? `\n${serverErr.trim().split('\n').slice(-8).join('\n')}` : '');
   const url = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server did not report a port within 30s')), 30_000);
+    const timer = setTimeout(() => reject(new Error(`server did not report a port within 30s${tail()}`)), 30_000);
     serverProc.stdout.on('data', (d) => {
       const m = String(d).match(/http:\/\/localhost:(\d+)/);
       if (m) { clearTimeout(timer); resolve(m[0]); }
     });
-    serverProc.on('error', reject);
+    serverProc.on('error', (e) => { clearTimeout(timer); reject(e); });
+    serverProc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`server exited (code ${code}) before reporting a port${tail()}`)); });
   });
   return url;
 }
+
+/** Close the browser and stop our server, waiting for it to exit so its files are released. */
+async function stopAll(browser) {
+  if (browser) await browser.close().catch(() => {});
+  if (serverProc && serverProc.exitCode === null && serverProc.signalCode === null) {
+    const exited = new Promise((r) => serverProc.once('exit', r));
+    serverProc.kill();
+    await Promise.race([exited, sleep(5000)]);
+  }
+}
+
+function removeSmokeHome() {
+  if (!smokeHome) return;
+  try { rmSync(smokeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); }
+  catch (e) { console.log(`  (could not remove the temporary data folder ${smokeHome}: ${e.message})`); }
+}
+
+// Every request the app makes must stay on this computer. Google Drive is
+// not set up in the suite, so a request to any other host fails the run:
+// it is a connection the shop never agreed to.
+const outsideRequests = [];
+const isLocalHost = (h) => h === 'localhost' || h === '[::1]' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h);
+function noteOutside(url, kind) {
+  let u;
+  try { u = new URL(url); } catch { return; }
+  if (!/^(https?|wss?|ftp):$/.test(u.protocol)) return; // data:, blob: and about: never leave the PC
+  if (isLocalHost(u.hostname.toLowerCase())) return;
+  outsideRequests.push(`${kind} ${u.origin}${u.pathname}`.slice(0, 160));
+}
+function watchRequests(context) {
+  context.on('request', (req) => noteOutside(req.url(), req.resourceType()));
+  context.on('page', (p) => p.on('websocket', (ws) => noteOutside(ws.url(), 'websocket')));
+}
+
+// The old product and maker names must not appear anywhere on screen.
+const OLD_NAME = /dice ?codes|free[ -]?gst[ -]?bill/i;
+const oldNameSeen = [];
 
 /** Remove only the records this suite created. */
 async function cleanup(page) {
@@ -60,6 +160,7 @@ async function cleanup(page) {
       };
       await del('purchases');
       await del('products');
+      await del('clients');
       await del('profiles');
       await del('expenses');
       await del('receipts');
@@ -95,8 +196,11 @@ async function cleanup(page) {
  * Called after EVERY navigation that reloads the page, because anything
  * gating first use can reappear, and a test that hangs for 30s tells you
  * far less than one that simply clears the way and carries on.
+ *
+ * `seen`, when given, collects the text of each screen it clears, so the
+ * first run's welcome wording can be checked.
  */
-async function dismissFirstRun(page) {
+async function dismissFirstRun(page, seen = null) {
   // A fresh install shows TWO screens in sequence, and their buttons are
   // capitalised differently: a region step ("Skip Setup") and then a
   // business-type step ("Skip setup"). Clearing one reveals the other.
@@ -116,6 +220,7 @@ async function dismissFirstRun(page) {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const hasNav = await page.evaluate(() => !!document.querySelector('.nav-btn'));
     if (hasNav && !(await blockingOverlay())) return;
+    if (seen) seen.push(await page.evaluate(() => (document.body.innerText || '').replace(/\s+/g, ' ').trim()).catch(() => ''));
     let clicked = false;
     for (const pattern of [/^skip setup$/i, /none of these/i, /get started/i, /continue|finish|close/i]) {
       const btn = page.getByRole('button', { name: pattern });
@@ -130,39 +235,76 @@ async function dismissFirstRun(page) {
   }
 }
 
-const APP = await startServer();
-console.log(`\nRunning smoke tests against ${APP} (Firefox)\n`);
+// Started inside a guard: if the server or the browser cannot start, nothing
+// may be left running and the temporary data folder is removed.
+let APP = null;
+let profileAtStart = null;
+let browser = null;
+let ctx = null;
+let page = null;
+try {
+  if (!BROWSERS[SMOKE_BROWSER]) {
+    throw new Error(`SMOKE_BROWSER=${SMOKE_BROWSER} is not supported; use ${Object.keys(BROWSERS).join(' or ')}`);
+  }
+  APP = await startServer();
+  console.log(`\nRunning smoke tests against ${APP} (${BROWSERS[SMOKE_BROWSER].name})${smokeHome ? `, data in ${smokeHome}` : ''}\n`);
 
-// The suite changes the ACTIVE business profile several times, and the server
-// replaces that file wholesale on every save. Snapshot it before anything runs
-// and put it back in `finally`, so a step that times out half way can never
-// leave a real profile reduced to a bare "Smoke Alpha".
-const profileAtStart = await fetch(`${APP}/api/profile`)
-  .then((r) => (r.ok ? r.json() : null))
-  .catch(() => null);
+  // The suite changes the ACTIVE business profile several times, and the server
+  // replaces that file wholesale on every save. Snapshot it before anything runs
+  // and put it back in `finally`, so a step that times out half way can never
+  // leave a real profile reduced to a bare "Smoke Alpha".
+  profileAtStart = await fetch(`${APP}/api/profile`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
 
-const browser = await firefox.launch({ headless: true });
-// 1366x768 is the resolution the preview-clipping bug needed (ERR-005).
-// It is also the most common laptop size among this app's users.
-const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true });
-// Playwright gives a page 30 s to load. On a busy machine - another dev
-// server pinning three cores was enough - a reload under the release gate ran
-// past that and aborted the whole suite, twice in a row, with code that had
-// just passed 76/76. A timeout bounds how long we wait, not whether the page
-// is right, so it gets room; every assertion stays exactly as strict.
-ctx.setDefaultNavigationTimeout(120000);
-ctx.setDefaultTimeout(60000);
-const page = await ctx.newPage();
+  browser = await BROWSERS[SMOKE_BROWSER].launch();
+  // 1366x768 is the resolution the preview-clipping bug needed (ERR-005).
+  // It is also the most common laptop size among this app's users.
+  ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true });
+  watchRequests(ctx);
+  // Playwright gives a page 30 s to load. On a busy machine - another dev
+  // server pinning three cores was enough - a reload under the release gate ran
+  // past that and aborted the whole suite, twice in a row, with code that had
+  // just passed 76/76. A timeout bounds how long we wait, not whether the page
+  // is right, so it gets room; every assertion stays exactly as strict.
+  ctx.setDefaultNavigationTimeout(120000);
+  ctx.setDefaultTimeout(60000);
+  page = await ctx.newPage();
+} catch (err) {
+  console.log(`\n  ✗ the suite could not start: ${err.message}\n`);
+  await stopAll(browser);
+  removeSmokeHome();
+  process.exit(1);
+}
 
 const cspViolations = [];
 page.on('console', (m) => { if (/Content-Security-Policy/i.test(m.text())) cspViolations.push(m.text()); });
 
+/** Record any old product or maker name on the current screen. */
+const noteOldName = async (where, p = page) => {
+  const m = (await p.evaluate(() => document.body.innerText || '').catch(() => '')).match(OLD_NAME);
+  if (m) oldNameSeen.push(`${where}: "${m[0]}"`);
+};
+
+// Dates relative to today, so the fixtures never age out of the current
+// financial year (same UTC day as the rest of the suite's dates).
+const isoDay = (offsetDays = 0) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+
 try {
   await page.goto(APP, { waitUntil: 'networkidle' });
   await sleep(2000);
-  await dismissFirstRun(page);
+  const firstRun = [];
+  await dismissFirstRun(page, firstRun);
   check('first-run setup can be dismissed',
     await page.evaluate(() => !!document.querySelector('.nav-btn')));
+  // A fresh install greets the shop by its own name. Only checked when a
+  // first-run screen appeared (always, for the suite's own fresh server).
+  if (smokeHome || firstRun.length) {
+    const shown = firstRun.join(' ');
+    check('a fresh install says "Welcome to HC Fashion House", with no trace of the old name',
+      /Welcome to HC Fashion House/.test(shown) && !OLD_NAME.test(shown),
+      (shown.match(OLD_NAME) || [])[0] || shown.slice(0, 90));
+  }
 
   // ---- App loads without breaking its own security policy ----------------
   // ERR-004 / ERR-007: the CSP blocked the print iframe and, separately,
@@ -175,24 +317,70 @@ try {
     && getComputedStyle(document.body).fontFamily.includes('Inter'));
   check('stylesheet actually applied', styled);
 
+  // ---- The shop's own name and mark ---------------------------------------
+  const brand = await page.evaluate(() => {
+    const logo = document.querySelector('.sidebar-logo img');
+    return {
+      sidebar: (document.querySelector('.sidebar-brand')?.innerText || '').replace(/\s+/g, ' ').trim(),
+      title: document.title,
+      logo: logo ? { alt: logo.getAttribute('alt'), loaded: logo.complete && logo.naturalWidth > 0 } : null,
+    };
+  });
+  check('the sidebar says "HC Fashion House" (no subtitle) and so does the window title',
+    brand.sidebar === 'HC Fashion House' && /^HC Fashion House( - .+)?$/.test(brand.title),
+    JSON.stringify({ sidebar: brand.sidebar, title: brand.title }));
+  check('the sidebar shows the HC monogram', brand.logo?.alt === 'HC Fashion House' && brand.logo.loaded === true,
+    JSON.stringify(brand.logo));
+  await noteOldName('Dashboard');
+
+  // ---- One-time clean-up of removed features (hcfh_purge_v1, main.jsx) ----
+  // What an older build left behind (promotion flags in the browser and in
+  // the data-folder copy of its settings) is removed once, then the flag is
+  // set. Seed it, clear the flag, load the app again.
+  const deadPrefs = ['freegstbill_supportNudge', 'freegstbill_welcomeCard', 'freegstbill_starBanner'];
+  await page.evaluate(async (keys) => {
+    const set = Object.fromEntries(keys.map((k) => [k, '1']));
+    await fetch('/api/local-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ set }) });
+    for (const k of [...keys, 'freegstbill_supportersCache', 'freegstbill_dismissedUpdate']) localStorage.setItem(k, '1');
+    localStorage.removeItem('hcfh_purge_v1');
+  }, deadPrefs);
+  await page.reload({ waitUntil: 'networkidle' });
+  await sleep(1500);
+  await dismissFirstRun(page);
+  let purge = null;
+  for (let i = 0; i < 20; i++) {
+    purge = await page.evaluate(async (keys) => {
+      const prefs = (await (await fetch('/api/local-prefs')).json()).value || {};
+      return {
+        flag: localStorage.getItem('hcfh_purge_v1'),
+        inDataFolder: keys.filter((k) => k in prefs),
+        inBrowser: [...keys, 'freegstbill_supportersCache', 'freegstbill_dismissedUpdate'].filter((k) => localStorage.getItem(k) !== null),
+      };
+    }, deadPrefs);
+    if (purge.flag === '1') break;
+    await sleep(500);
+  }
+  check('the one-time clean-up removes the old promotion and update flags, then sets hcfh_purge_v1',
+    purge?.flag === '1' && purge.inDataFolder.length === 0 && purge.inBrowser.length === 0, JSON.stringify(purge));
+
   // ---- Seed fixtures -----------------------------------------------------
-  await page.evaluate(async () => {
+  await page.evaluate(async (day) => {
     const post = (u, b) => fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
     await post('/api/products', { id: 'smoketest-m', name: 'Mouse', hsn: 'sdf', purchasePrice: 250, taxPercent: 18, stock: 0 });
     await post('/api/products', { id: 'smoketest-p', name: 'Pen drive', hsn: 's', purchasePrice: 399, taxPercent: 12, stock: 0 });
     await post('/api/purchases', {
-      id: 'smoketest-b1', date: '2026-08-01', supplierName: 'Alpha Traders',
+      id: 'smoketest-b1', date: day, supplierName: 'Alpha Traders',
       supplierGstin: '07AAAAA0000A1Z1', supplierAddress: 'Delhi', interstate: false,
       invoiceNumber: 'SMOKE/A', paymentStatus: 'Unpaid',
       items: [{ name: 'Mouse', hsn: 'sdf', quantity: 1, rate: 250, taxPercent: 18, cessPercent: 0 }],
     });
     await post('/api/purchases', {
-      id: 'smoketest-b2', date: '2026-08-02', supplierName: 'Beta Supplies',
+      id: 'smoketest-b2', date: day, supplierName: 'Beta Supplies',
       supplierGstin: '29BBBBB1111B2Z2', supplierAddress: 'Bengaluru', interstate: true,
       invoiceNumber: 'SMOKE/B', paymentStatus: 'Unpaid',
       items: [{ name: 'Pen drive', hsn: 's', quantity: 1, rate: 399, taxPercent: 12, cessPercent: 0 }],
     });
-  });
+  }, isoDay(0));
   await page.reload({ waitUntil: 'networkidle' });
   await sleep(1600);
   await dismissFirstRun(page);
@@ -324,6 +512,7 @@ try {
 
   // ERR-004/007 again, end to end: a real PDF must download, and its size
   // is a proxy for whether the stylesheet made it into the render.
+  const outsideBeforePdf = outsideRequests.length;
   let pdfBytes = 0;
   try {
     const [dl] = await Promise.all([
@@ -337,6 +526,24 @@ try {
 
   check('no CSP violations during PDF generation', cspViolations.length === 0,
     cspViolations[0]?.slice(0, 90) || '');
+
+  // Save & Download used to upload every invoice to Google Drive by itself
+  // once a Client ID was saved. Now only an explicit "Save to Drive" uploads,
+  // and that button exists only when Drive is set up, which it is not here.
+  await sleep(1500); // room for anything the download might have set off
+  check('Save & Download sends nothing outside the PC (no Google request)',
+    outsideRequests.length === outsideBeforePdf, outsideRequests.slice(outsideBeforePdf, outsideBeforePdf + 3).join(' | '));
+  let toolbarButtons = [];
+  for (let i = 0; i < 20; i++) { // the button reads "Generating..." until the PDF is done
+    toolbarButtons = await page.evaluate(() =>
+      [...document.querySelectorAll('.generator-toolbar button')].map((b) => b.innerText.trim().replace(/\s+/g, ' ')).filter(Boolean));
+    if (toolbarButtons.some((t) => /save & download/i.test(t))) break;
+    await sleep(500);
+  }
+  check('no "Save to Drive" button while Google Drive is not set up',
+    toolbarButtons.some((t) => /save & download/i.test(t)) && !toolbarButtons.some((t) => /save to drive/i.test(t)),
+    JSON.stringify(toolbarButtons));
+  await noteOldName('New Invoice');
 
   // Generating the PDF saves the invoice, so the editor now holds a real,
   // dirty bill and navigating away raises the leave-guard. Dismiss it, then
@@ -356,6 +563,7 @@ try {
       .find((d) => /unsaved changes/i.test(d.textContent || '') && d.offsetParent !== null));
 
   check('#43 no unsaved-changes bar on a clean form', !(await barShown()));
+  await noteOldName('Settings');
 
   // Use a value that cannot already be on disk. A fixed string silently
   // breaks this test the second time it runs: the field already holds it,
@@ -424,17 +632,17 @@ try {
   // change. The second half is the part that matters — a "mark read" that
   // silences a genuinely new overdue invoice would be worse than not
   // clearing at all.
-  const seedOverdue = (n) => page.evaluate(async (n) => {
+  const seedOverdue = (n) => page.evaluate(async ({ n, due }) => {
     await fetch('/api/bills', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: `smoketest-ovd-${n}`, invoiceNumber: `SMOKE-OVD/${n}`, clientName: 'Smoke Test Client',
         status: 'unpaid', totalAmount: 5000, payments: [], items: [],
-        data: { details: { dueDate: '2026-01-10', invoiceNumber: `SMOKE-OVD/${n}` },
+        data: { details: { dueDate: due, invoiceNumber: `SMOKE-OVD/${n}` },
                 client: { name: 'Smoke Test Client' }, totals: { total: 5000 } },
       }),
     });
-  }, n);
+  }, { n, due: isoDay(-30) });
   const badgeCount = () => page.evaluate(() => {
     const bell = [...document.querySelectorAll('button')].find((b) => /notification/i.test(b.title || ''));
     return bell ? Number((bell.innerText.match(/\d+/) || [0])[0]) : -1;
@@ -580,7 +788,7 @@ try {
     afterSwitch.includes('SMOKE-BETA/1') && !afterSwitch.includes('SMOKE-MINE/1'));
 
   // ======================================================================
-  // v1.10.66 — #64 (@sangwanmail-eng), #61, #62, #59
+  // v1.10.66 — #64, #61, #62, #59
   // ======================================================================
   // Every "ignores another company" check below is paired with a sanity check
   // that the same number DOES move for this company. Without the pair, a card
@@ -770,6 +978,39 @@ try {
   check('#64 Receipts hides another company\'s receipts', !rcp.includes('SMOKE-RCP-B'));
   check('#64 a receipt saved before companies were separated is still listed', rcp.includes('SMOKE-RCP-LEGACY'));
 
+  // ---- D-071: editing a receipt never pays its invoice twice --------------
+  // Rs 700 recorded on the Dashboard against a Rs 1,000 invoice: the payment
+  // and its receipt share an id. The payment carries no receipt number, as
+  // the Dashboard wrote them before the fix (and as older books still hold
+  // them). Editing only the receipt's note on the Receipts page looked the
+  // payment up by number, missed it, and added a second Rs 700 payment
+  // (Rs 1,400, "paid"); it is now found by the receipt's id.
+  {
+    const prof71 = await page.evaluate(async () => (await fetch('/api/profile')).json());
+    const pay71 = { id: 'smoketest-pay071', amount: 700, date: today, mode: 'bank-transfer', note: 'smoke first note',
+      recordedAt: new Date().toISOString() };
+    await api('/api/bills', { id: 'smoketest-d071', invoiceNumber: 'SMOKE-D071/1', invoiceType: 'tax-invoice', clientName: 'Smoke Test Client',
+      status: 'partial', totalAmount: 1000, paidAmount: 700, invoiceDate: today, payments: [pay71], items: [],
+      data: { profile: prof71, client: { name: 'Smoke Test Client' }, details: { invoiceNumber: 'SMOKE-D071/1', invoiceDate: today }, totals: { total: 1000 } } });
+    await api('/api/receipts', { id: pay71.id, date: today, receiptNo: 'SMOKE-RCPT-071', clientName: 'Smoke Test Client', clientAddress: '',
+      amount: 700, paymentMode: 'bank-transfer', referenceNo: pay71.note, againstInvoice: 'SMOKE-D071/1', note: pay71.note,
+      currency: 'INR', source: 'auto-from-payment', billId: 'smoketest-d071', ownerGstin: prof71.gstin || '', ownerName: prof71.businessName || '' });
+    await reopenView('Receipts');
+    await page.locator('tr', { hasText: 'SMOKE-RCPT-071' }).first().locator('button[title="Edit"]').click({ timeout: 10_000 }).catch(() => {});
+    await sleep(800);
+    const noteBox = page.locator('.form-group', { has: page.locator('label.form-label', { hasText: /^Note \(optional\)$/ }) }).locator('input').first();
+    const editOpened = (await noteBox.count()) > 0;
+    if (editOpened) {
+      await noteBox.fill('smoke edited note');
+      await page.getByRole('button', { name: /^Save Receipt$/ }).click();
+      await sleep(2500);
+    }
+    const bill71 = await page.evaluate(async () => (await (await fetch('/api/bills')).json()).find((b) => b.id === 'smoketest-d071') || null);
+    check('D-071 editing only the note of a Dashboard receipt keeps one Rs 700 payment and the invoice partly paid',
+      editOpened && bill71?.payments?.length === 1 && Number(bill71.paidAmount) === 700 && bill71.status === 'partial',
+      JSON.stringify({ editOpened, payments: bill71?.payments?.length, paid: bill71?.paidAmount, status: bill71?.status }));
+  }
+
   // ---- #61 / #62 / #64 item 5: what the invoice itself prints --------------
   await api('/api/profile', { businessName: 'Smoke Alpha', gstin: TEST_GSTIN, state: 'Punjab', country: 'India' });
   const openDraft = async (draft) => {
@@ -873,6 +1114,7 @@ try {
     desk.bar === 'none' && desk.left === 0 && desk.width > 200, JSON.stringify(desk));
 
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  watchRequests(phone);
   const mob = await phone.newPage();
   try {
     await mob.goto(APP, { waitUntil: 'networkidle' });
@@ -889,6 +1131,10 @@ try {
     const startBox = await menuBox();
     check('#59 on a phone the menu starts hidden behind a menu button',
       barShownOnPhone && startBox.right <= 1, `bar=${barShownOnPhone} menu=${JSON.stringify(startBox)}`);
+    // Short name where space is tight.
+    const phoneTitle = await mob.evaluate(() => document.querySelector('.mobile-topbar-title')?.innerText.trim() || '');
+    check('on a phone the top bar names the shop "HC Fashion"', phoneTitle === 'HC Fashion', phoneTitle);
+    await noteOldName('phone', mob);
     if (barShownOnPhone) {
       await mob.getByRole('button', { name: 'Open menu' }).click();
       await sleep(700);
@@ -911,7 +1157,7 @@ try {
   }
 
   // ======================================================================
-  // v1.10.67 — #66 (@sangwanmail-eng)
+  // v1.10.67 — #66
   // ======================================================================
   const salesCards = async () => {
     await reopenView('Dashboard');
@@ -1135,6 +1381,49 @@ try {
   check('v75 Settings round-off switch saves the invoice default',
     roundOffSaved === !roundOffBefore, `was ${roundOffBefore}, saved ${roundOffSaved}`);
 
+  // ---- D-020: saved print templates neither nest nor wipe each other ------
+  // Save A, change a custom prefix, save B, load A: both stay listed and the
+  // prefix keeps its newer value (a template carries the design only). The
+  // prefix is changed in the browser's stored print settings and the screen
+  // reloaded; the stored settings are put back afterwards.
+  {
+    const psBefore = await page.evaluate(() => localStorage.getItem('gst_printSettings'));
+    const setQuotePrefix = async (prefix) => {
+      await page.evaluate((prefix) => {
+        const s = JSON.parse(localStorage.getItem('gst_printSettings') || '{}');
+        s.customPrefixes = { ...(s.customPrefixes || {}), quotation: prefix };
+        localStorage.setItem('gst_printSettings', JSON.stringify(s));
+        sessionStorage.setItem('gst_currentView', 'settings');
+      }, prefix);
+      await page.reload({ waitUntil: 'networkidle' });
+      await sleep(2500);
+      await dismissFirstRun(page);
+    };
+    const saveTemplate = async (name) => {
+      await page.locator('input[placeholder="Template name (e.g. Retail v1)"]').fill(name, { timeout: 10_000 });
+      await page.getByRole('button', { name: /Save current as template/ }).click({ timeout: 10_000 });
+      await sleep(800);
+    };
+    let loaded = false;
+    try {
+      await setQuotePrefix('SMQA');
+      await saveTemplate('SMOKE-TPL-A');
+      await setQuotePrefix('SMQB');
+      await saveTemplate('SMOKE-TPL-B');
+      await page.locator('span', { hasText: /^SMOKE-TPL-A$/ }).locator('xpath=..').getByRole('button', { name: 'Load', exact: true }).click({ timeout: 10_000 });
+      await page.getByRole('button', { name: /^Load template$/ }).click({ timeout: 10_000 });
+      await sleep(1200);
+      loaded = true;
+    } catch { /* judged below */ }
+    const ps20 = await page.evaluate(() => JSON.parse(localStorage.getItem('gst_printSettings') || '{}'));
+    const names20 = (ps20.savedTemplates || []).map((t) => t.name);
+    const nested20 = (ps20.savedTemplates || []).some((t) => t?.settings && ('savedTemplates' in t.settings || 'customPrefixes' in t.settings));
+    await page.evaluate((v) => { if (v === null) localStorage.removeItem('gst_printSettings'); else localStorage.setItem('gst_printSettings', v); }, psBefore);
+    check('D-020 saving template B keeps A; loading A keeps both and the newer custom prefix',
+      loaded && names20.includes('SMOKE-TPL-A') && names20.includes('SMOKE-TPL-B') && ps20.customPrefixes?.quotation === 'SMQB' && !nested20,
+      JSON.stringify({ loaded, names: names20, prefix: ps20.customPrefixes?.quotation, nested: nested20 }));
+  }
+
   // ---- #68: a GSTIN fills in the state, offline -------------------------
   await openDraft({
     invoiceType: 'tax-invoice',
@@ -1198,7 +1487,7 @@ try {
     doneOf(withBank) === doneOf(noBank) + 1,
     `without bank ${doneOf(noBank)}/4, with bank ${doneOf(withBank)}/4`);
 
-  // ---- #71 (@sangwanmail-eng) -------------------------------------------
+  // ---- #71 --------------------------------------------------------------
   // 1. Customize belongs in the sticky toolbar, right before Show Preview.
   await openDraft({
     invoiceType: 'tax-invoice',
@@ -1412,19 +1701,122 @@ try {
   // Untick it again: display options are saved, and this must not leak.
   if (await box72.count() && await box72.isChecked()) { await box72.click(); await sleep(2500); }
 
+  // ---- D-090: an 80 mm receipt prints the invoice's Terms -----------------
+  // Chosen through Customize, as staff do. The paper size is saved as the
+  // default for new invoices, so it is put back at the end. The Terms also hold
+  // a picture with a web address: it must lose that address (the sanitize hook
+  // in main.jsx) and never be fetched (the outside-request watch, and the CSP
+  // log, would both catch it).
+  await openDraft({ ...seamDraft(1), details: { invoiceNumber: 'SMOKE-090/1', invoiceDate: today, placeOfSupply: 'Punjab' },
+    customTerms: '<p>SMOKE-THERMAL-TERMS: exchange within 7 days.</p><p><img src="https://smoke-remote.example/terms.png" alt="remote"></p>' });
+  if (!(await page.evaluate(() => !!document.querySelector('label.option-toggle')))) {
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('.generator-toolbar button')].find((x) => /^Customize$/.test(x.innerText.trim()));
+      if (b) b.click();
+    });
+    await sleep(1000);
+  }
+  const paperSelect = page.locator('select', { has: page.locator('option[value="thermal80"]') }).first();
+  const paperBefore = (await paperSelect.count()) ? await paperSelect.inputValue() : null;
+  const receiptTerms = () => page.evaluate(() => {
+    const p = document.querySelector('#invoice-preview');
+    const text = (p?.innerText || '').replace(/\s+/g, ' ');
+    return {
+      terms: /SMOKE-THERMAL-TERMS/i.test(text),
+      heading: /terms\s*(&|and)\s*conditions/i.test(text),
+      remoteSrc: [...(p?.querySelectorAll('img') || [])].some((i) => /^(https?:)?\/\//i.test(i.getAttribute('src') || '')),
+      thermal: !!p?.querySelector('.paper-thermal80, [class*="thermal"]'),
+    };
+  });
+  let th1 = null;
+  let th2 = null;
+  const termsToggle = page.locator('label.option-toggle').filter({ hasText: /^\s*Terms & Conditions\s*$/ }).locator('input[type=checkbox]').first();
+  const toggleFound = await termsToggle.count();
+  if (paperBefore !== null) {
+    await paperSelect.selectOption('thermal80');
+    await sleep(1500);
+    th1 = await receiptTerms();
+    if (toggleFound && await termsToggle.isChecked()) { await termsToggle.click(); await sleep(1200); }
+    th2 = await receiptTerms();
+    // Put both back: Terms on, the paper size it had.
+    if (toggleFound && !(await termsToggle.isChecked())) { await termsToggle.click(); await sleep(800); }
+    await paperSelect.selectOption(paperBefore);
+    await sleep(2500);
+  }
+  check('D-090 an 80 mm receipt prints the invoice\'s Terms under their heading',
+    !!th1?.terms && !!th1.heading, JSON.stringify({ paperBefore, th1 }));
+  check('D-090 unticking Customize > Terms & Conditions takes them off the receipt',
+    toggleFound > 0 && !!th1?.terms && th2?.terms === false, JSON.stringify({ toggleFound, th2 }));
+  check('a picture with a web address in the Terms is shown without that address (never fetched)',
+    !!th1 && th1.remoteSrc === false, JSON.stringify(th1));
+
+  // ---- Plain-text Terms keep "<city>" as typed ---------------------------
+  // Terms templates written in Settings are plain text. "<city>" in the HC
+  // Fashion House Store Terms used to vanish as an unknown HTML tag, printing
+  // "Subject to  jurisdiction."
+  await api('/api/templates', { id: 'smoketest-hcterms', name: 'Smoke HC Terms',
+    content: '1. Exchange within 7 days of purchase with this invoice.\n2. Prices include GST.\n3. Subject to <city> jurisdiction.\nE. & O.E.' });
+  await page.evaluate(() => { sessionStorage.removeItem('gst_editingBill'); sessionStorage.removeItem('gst_invoiceDraft'); sessionStorage.setItem('gst_currentView', 'new'); });
+  await page.reload({ waitUntil: 'networkidle' });
+  await sleep(3000);
+  await dismissFirstRun(page);
+  await page.waitForSelector('#invoice-preview', { timeout: 20000 }).catch(() => {});
+  await page.locator('select', { has: page.locator('option', { hasText: 'Smoke HC Terms' }) }).first()
+    .selectOption({ label: 'Smoke HC Terms' }, { timeout: 10_000 }).catch(() => {});
+  await sleep(1200);
+  const cityText = (await page.locator('#invoice-preview').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  check('a plain-text Terms template keeps "<city>" and "&" as typed on the invoice',
+    /Subject to <city> jurisdiction\./i.test(cityText) && /E\. & O\.E\./i.test(cityText),
+    (cityText.match(/Subject to.{0,30}/i) || ['no terms line'])[0]);
+
   // ---- v1.10.72 (#73): the Control Panel finds its scripts ---------------------
   // The release ZIP puts them next to server.js in _system/; the server looked
   // only in _system-scripts folders, so every ZIP install reported "Launcher
-  // scripts not detected" and Update / Backup failed. Status only: the suite
-  // must never actually run an update or a backup.
+  // scripts not detected" and Backup failed. The folder is now found by its
+  // backup script, and there is no update action at all: new versions are
+  // installed by hand. Status only: the suite must never run a backup.
   const cp = await page.evaluate(async () => (await fetch('/api/control-panel/status')).json());
-  check('#73 the Control Panel finds its update and backup scripts',
-    cp.controlScriptsAvailable === true && cp.actions?.update === true && cp.actions?.backup === true,
-    JSON.stringify({ available: cp.controlScriptsAvailable, actions: cp.actions }));
+  const cpActions = cp.actions || {};
+  check('#73 the Control Panel offers no update action',
+    !('update' in cpActions), JSON.stringify({ available: cp.controlScriptsAvailable, actions: cpActions }));
+  // HC Fashion House ships its Control Panel scripts for Windows only.
   if (cp.platform === 'win32') {
-    check('#73 on Windows every Control Panel action has its script',
-      ['update', 'backup', 'restore', 'move', 'stop'].every((k) => cp.actions?.[k] === true), JSON.stringify(cp.actions));
+    check('#73 on Windows the Control Panel finds its backup, restore, move and stop scripts',
+      cp.controlScriptsAvailable === true && ['backup', 'restore', 'move', 'stop'].every((k) => cpActions[k] === true),
+      JSON.stringify({ available: cp.controlScriptsAvailable, actions: cpActions }));
   }
+  // Made from the page, so they carry an Origin as the app's own requests do.
+  // Sent only once the server has shown it knows no update action, and the
+  // "update" launch only after the update check is confirmed gone: an older
+  // server would act on it (download and install upstream code).
+  if (!('update' in cpActions)) {
+    const gone = await page.evaluate(async () => {
+      const updateCheck = (await fetch('/api/check-update')).status;
+      const changelog = (await fetch('/api/changelog')).status;
+      const launch = updateCheck !== 404 ? null : (await fetch('/api/control-panel/launch-script', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update' }) })).status;
+      return { launch, updateCheck, changelog };
+    });
+    check('#73 the server refuses an "update" action (nothing is started)', gone.launch === 400, JSON.stringify(gone));
+    check('#73 there is no update-check or changelog endpoint any more',
+      gone.updateCheck === 404 && gone.changelog === 404, JSON.stringify(gone));
+  }
+
+  // A web page that points its own site name at this PC (DNS rebinding) still
+  // sends that name as Host: the server answers only its own names on its own
+  // port (421 otherwise). Sent from Node, which can set any Host.
+  const hostStatus = (host) => new Promise((done) => {
+    const req = httpGet({ host: '127.0.0.1', port: new URL(APP).port, path: '/api/version', headers: { Host: host } },
+      (r) => { r.resume(); done(r.statusCode); });
+    req.on('error', () => done(0));
+    req.setTimeout(10_000, () => { req.destroy(); done(0); });
+  });
+  const hostCheck = {
+    own: await hostStatus(`127.0.0.1:${new URL(APP).port}`),
+    foreign: await hostStatus(`smoke-rebind.example:${new URL(APP).port}`),
+  };
+  check('the server answers its own address and refuses any other host name (421)',
+    hostCheck.own === 200 && hostCheck.foreign === 421, JSON.stringify(hostCheck));
 
   // ---- v1.10.71: Generate Now uses the server's full invoice maths ---------
   // It used to do its own simplified maths in the browser (no CGST/SGST/IGST
@@ -1791,16 +2183,207 @@ try {
     for (const id of made79) await page.evaluate(async (id) => fetch('/api/bills/' + encodeURIComponent(id), { method: 'DELETE' }), id);
   }
 
-  // ---- v1.10.80: Support page payment note names the business ------------
+  // ---- A tab that remembers a removed screen opens the Dashboard ----------
+  // The Support page and What's new are gone. A tab that last showed one of
+  // them (the screen is kept in sessionStorage across reloads), or an old
+  // ?view=support link, must land on the Dashboard, not an empty main area.
   {
-    const prof80 = await page.evaluate(async () => (await fetch('/api/profile')).json());
-    await page.evaluate(() => { sessionStorage.removeItem('gst_editingBill'); sessionStorage.removeItem('gst_invoiceDraft'); sessionStorage.setItem('gst_currentView', 'support'); });
-    await page.reload({ waitUntil: 'networkidle' });
-    await sleep(2500);
+    const landedOn = async (view, url = null) => {
+      await page.evaluate((v) => { sessionStorage.removeItem('gst_editingBill'); sessionStorage.removeItem('gst_invoiceDraft'); sessionStorage.setItem('gst_currentView', v); }, view);
+      if (url) await page.goto(url, { waitUntil: 'networkidle' });
+      else await page.reload({ waitUntil: 'networkidle' });
+      await sleep(2500);
+      await dismissFirstRun(page);
+      return page.evaluate(() => ({
+        title: document.querySelector('.main-content .page-title')?.innerText.trim() || '',
+        filled: (document.querySelector('.main-content')?.innerText || '').trim().length > 0,
+      }));
+    };
+    const fromSupport = await landedOn('support');
+    check('a tab still showing the removed Support page reopens on the Dashboard, not a blank page',
+      fromSupport.title === 'Dashboard' && fromSupport.filled, JSON.stringify(fromSupport));
+    const fromOldLink = await landedOn('whatsnew', new URL('/?view=support', APP).href);
+    check('an old What\'s new screen or ?view=support link opens the Dashboard too',
+      fromOldLink.title === 'Dashboard' && fromOldLink.filled, JSON.stringify(fromOldLink));
+    await page.goto(APP, { waitUntil: 'networkidle' }); // drop ?view= from the address again
+    await sleep(2000);
     await dismissFirstRun(page);
-    const noteText = await page.getByText(/^Payment note:/).first().innerText().catch(() => '');
-    const expected = ('Free GST Billing support - ' + String(prof80.businessName || '').replace(/[^A-Za-z0-9 .-]+/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 50).trim();
-    check('v80 the UPI payment note names the business', !!prof80.businessName && noteText.includes(expected), noteText);
+  }
+
+  // ---- About, the footer and the menu: the shop's name, no outside links --
+  {
+    const version = await page.evaluate(async () => (await (await fetch('/api/version')).json()).current || '');
+    await openView('Dashboard');
+    const footer = await page.evaluate(() => {
+      const f = document.querySelector('.main-content footer');
+      return f ? { text: f.innerText.replace(/\s+/g, ' ').trim(), links: [...f.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')) } : null;
+    });
+    check('the Dashboard footer reads "HC Fashion House v<version>" and links nowhere',
+      !!version && !!footer && footer.text.includes(`HC Fashion House v${version}`) && footer.links.length === 0, JSON.stringify(footer));
+
+    await openView('About');
+    let about = { text: '', outside: [] };
+    for (let i = 0; i < 10; i++) { // the version comes from the server a moment after the page
+      about = await page.evaluate(() => {
+        const main = document.querySelector('.main-content');
+        return {
+          text: (main?.innerText || '').replace(/\s+/g, ' ').trim(),
+          outside: [...(main?.querySelectorAll('a[href]') || [])].map((a) => a.getAttribute('href') || '').filter((h) => /^(https?:)?\/\//i.test(h)),
+        };
+      });
+      if (version && about.text.includes(`Version ${version}`)) break;
+      await sleep(500);
+    }
+    check('About shows "HC Fashion House", the version and the contact line, and links nowhere outside',
+      !!version && about.text.includes('HC Fashion House') && about.text.includes(`Version ${version}`)
+        && about.text.includes('Contact your HC Fashion House administrator') && about.outside.length === 0,
+      about.outside.length ? about.outside.join(' ') : about.text.slice(0, 160));
+    await noteOldName('About');
+
+    await openView('Control Panel');
+    await noteOldName('Control Panel');
+    const navLabels = await page.evaluate(() => [...document.querySelectorAll('.sidebar .nav-btn')].map((b) => b.innerText.trim()));
+    check('the menu has About, and no Support page or online User Guide',
+      navLabels.includes('About') && !navLabels.some((t) => /support|user guide/i.test(t)), JSON.stringify(navLabels));
+  }
+
+  // ---- Backup files: export, and restore with "Replace existing data" ----
+  // Unticked (the default), a restore only adds what this PC does not have.
+  // Ticked, the backup's records replace the ones here, after a snapshot.
+  // Either way it never brings a Google Client ID, another PC's install id or
+  // backup folder, and never lowers an invoice counter. Backups from the old
+  // version (no format version, partial ones included) still restore.
+  {
+    const get = (url) => page.evaluate(async (u) => (await fetch(u)).json(), url);
+    const post = (url, body) => page.evaluate(async ({ u, b }) => {
+      const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      return { status: r.status, json: await r.json().catch(() => null) };
+    }, { u: url, b: body });
+    const productName = async (id) => (await get('/api/products')).find((p) => p.id === id)?.name ?? null;
+    const item = (id, name) => ({ id, name, hsn: '9608', rate: 10, sellingPrice: 10, taxPercent: 18, unit: 'Pcs', stock: 5 });
+    const jsonFile = (name, data) => ({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+    await post('/api/products', item('smoketest-imp', 'Smoke Import Original'));
+    // A partial backup as the old version wrote them: products only, no
+    // profile, no invoices, no format version; only its marker says what it is.
+    const backupFile = jsonFile('hc-fashion-house-backup-smoke.json', { exportedAt: new Date().toISOString(), __freegstbill_backup: true,
+      products: [item('smoketest-imp', 'Smoke Import Replaced'), item('smoketest-imp-new', 'Smoke Import New')] });
+    // Through the Settings screen, the way staff do it.
+    const restoreFile = async (replace, file = backupFile) => {
+      await page.locator('input[type="file"][accept=".json"]').setInputFiles(file);
+      const box = page.getByRole('checkbox', { name: /Replace existing data/i });
+      await box.first().waitFor({ timeout: 10_000 }).catch(() => {});
+      const shown = await box.count();
+      const tickedAtFirst = shown ? await box.first().isChecked() : null;
+      if (shown && replace) await box.first().check();
+      await page.getByRole('button', { name: /Restore selected/i }).first().click({ timeout: 10_000 }).catch(() => {});
+      await sleep(2500);
+      return { shown, tickedAtFirst };
+    };
+    const snapshots = () => {
+      try { return readdirSync(join(smokeHome, 'data', 'backups')).filter((n) => /^pre-import-/.test(n)).length; } catch { return 0; }
+    };
+
+    await openView('Settings');
+
+    // An export names the shop, carries a format version and never the
+    // Google Drive Client ID (a restore elsewhere must not switch Drive on).
+    const profileForExport = await get('/api/profile');
+    await post('/api/profile', { ...profileForExport, googleClientId: 'smoke-test-client-id' });
+    let exportName = '';
+    let exported = null;
+    try {
+      await page.getByRole('button', { name: /Export Backup/i }).first().click();
+      const [dl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 30_000 }),
+        page.getByRole('button', { name: /Download Backup/i }).first().click(),
+      ]);
+      exportName = dl.suggestedFilename();
+      exported = JSON.parse(readFileSync(await dl.path(), 'utf8'));
+    } catch { /* judged below */ }
+    const exportModal = page.locator('.modal-content', { hasText: 'Export Backup' });
+    if (await exportModal.count()) await exportModal.getByRole('button', { name: /^Cancel$/ }).click().catch(() => {});
+    await post('/api/profile', { ...profileForExport, googleClientId: '' });
+    check('an export is an HC Fashion House backup file with a format version and no Drive Client ID',
+      /^hc-fashion-house-backup-\d{4}-\d{2}-\d{2}\.json$/.test(exportName) && exported?.formatVersion === 1
+        && exported.__freegstbill_backup === true && !!exported.profile && !exported.profile.googleClientId
+        && !(exported.profiles || []).some((p) => p?.googleClientId),
+      JSON.stringify({ file: exportName, formatVersion: exported?.formatVersion, clientId: exported?.profile?.googleClientId ?? null }));
+
+    const merge = await restoreFile(false);
+    const afterMerge = { existing: await productName('smoketest-imp'), added: await productName('smoketest-imp-new') };
+    check('Restore offers "Replace existing data", unticked to begin with',
+      merge.shown > 0 && merge.tickedAtFirst === false, JSON.stringify(merge));
+    check('a restore without "Replace existing data" adds what is missing and keeps what is here',
+      afterMerge.existing === 'Smoke Import Original' && afterMerge.added === 'Smoke Import New', JSON.stringify(afterMerge));
+
+    const snapsBefore = smokeHome ? snapshots() : 0;
+    const replace = await restoreFile(true);
+    const replaced = await productName('smoketest-imp');
+    const snapsAfter = smokeHome ? snapshots() : 0;
+    check('with "Replace existing data" ticked the backup\'s record wins, after a snapshot of the data',
+      replace.shown > 0 && replaced === 'Smoke Import Replaced' && (!smokeHome || snapsAfter > snapsBefore),
+      JSON.stringify({ replaced, snapshots: smokeHome ? `${snapsBefore} -> ${snapsAfter}` : 'not checked (APP_URL)' }));
+
+    // A full backup made by the old version (no format version, the old
+    // marker). Restored without "Replace existing data": its records arrive,
+    // this PC keeps its own business profile, the per-GSTIN "Filed" marks come
+    // back, and a browser key that is not a setting is never written.
+    const businessBefore = (await get('/api/profile')).businessName;
+    const marks = JSON.stringify({ 'smoke-period': { gstr1: true } });
+    const oldDay = isoDay(0);
+    await restoreFile(false, jsonFile('old-version-backup-smoke.json', {
+      exportedAt: `${oldDay}T09:00:00.000Z`, version: '1.10.82', __freegstbill_backup: true,
+      profile: { businessName: 'Smoke Old Firm', state: 'Punjab', country: 'India', googleClientId: 'smoke-test-client-id' },
+      bills: [{ id: 'smoketest-old-bill', invoiceNumber: 'smoketest-old-bill', clientName: 'Smoke Old Client', invoiceDate: oldDay,
+        invoiceType: 'tax-invoice', status: 'unpaid', totalAmount: 118, paidAmount: 0, payments: [],
+        data: { details: { invoiceNumber: 'smoketest-old-bill', invoiceDate: oldDay }, client: { name: 'Smoke Old Client' }, items: [], totals: { total: 118 } } }],
+      clients: [{ id: 'smoketest-old-client', name: 'Smoke Old Client', state: 'Punjab', country: 'India' }],
+      meta: { counter_INV: 1, installId: 'smoke-old-install' },
+      localStorage: { gst_filing_status_03AAAAA1111A1Z1: marks, smoke_foreign_key: 'x' },
+    }));
+    const oldRestore = {
+      bill: (await get('/api/bills')).some((b) => b.id === 'smoketest-old-bill'),
+      client: (await get('/api/clients')).some((c) => c.id === 'smoketest-old-client'),
+      profileKept: (await get('/api/profile')).businessName === businessBefore,
+      filedMarks: await page.evaluate(() => localStorage.getItem('gst_filing_status_03AAAAA1111A1Z1')) === marks,
+      foreignKey: await page.evaluate(() => localStorage.getItem('smoke_foreign_key')),
+      installId: (await get('/api/meta/installId')).value ?? null,
+    };
+    check('a full backup from the old version still restores: records and Filed marks come back, this PC keeps its profile',
+      oldRestore.bill && oldRestore.client && oldRestore.profileKept && oldRestore.filedMarks
+        && oldRestore.foreignKey === null && oldRestore.installId !== 'smoke-old-install',
+      JSON.stringify(oldRestore));
+
+    // The same restore sent to the server directly, carrying values that
+    // must never come across from a backup file.
+    const counterBefore = (await get('/api/meta/counter_INV')).value ?? null;
+    await post('/api/meta/counter_INV', { value: 500 });
+    const metaNow = (await get('/api/export')).meta || {};
+    const profileNow = await get('/api/profile');
+    const foreignFolder = join(tmpdir(), 'hcfh-smoke-foreign-backups'); // where backups would go if it came across
+    const res = await post('/api/import?overwrite=1', {
+      profile: { ...profileNow, googleClientId: 'smoke-test-client-id' },
+      profiles: [{ id: 'smoketest-imp-prof', businessName: 'Smoke Import Firm', googleClientId: 'smoke-test-client-id' }],
+      meta: { ...metaNow, counter_INV: 3, installId: 'smoke-foreign-install', backupFolder: foreignFolder },
+    });
+    const savedProfile = (await get('/api/profiles')).find((p) => p.id === 'smoketest-imp-prof');
+    const after = {
+      status: res.status,
+      clientId: (await get('/api/profile')).googleClientId || '',
+      savedProfile: savedProfile ? savedProfile.googleClientId || '' : 'not written',
+      counter: Number((await get('/api/meta/counter_INV')).value) || 0,
+      installId: (await get('/api/meta/installId')).value ?? null,
+      backupFolder: (await get('/api/meta/backupFolder')).value ?? null,
+    };
+    await post('/api/meta/counter_INV', { value: counterBefore });
+    check('a restored backup never brings a Google Client ID, another PC\'s install id or backup folder, and never lowers a counter',
+      after.status === 200 && !after.clientId && after.savedProfile === '' && after.counter >= 500
+        && after.installId !== 'smoke-foreign-install' && after.backupFolder !== foreignFolder,
+      JSON.stringify(after));
+    const told = res.json || {};
+    check('the restore reports what it wrote, what it skipped and whether the profile was written',
+      told.written !== undefined && told.skipped !== undefined && typeof told.profileWritten === 'boolean',
+      JSON.stringify(told).slice(0, 160));
   }
 
   // Put the real business details back.
@@ -1825,13 +2408,30 @@ try {
   try { await cleanup(page); } catch { /* ignore */ }
 } finally {
   if (profileAtStart) {
+    // Sent from Node, so it states the app's own origin as the page would:
+    // the server refuses a change that names none.
     await fetch(`${APP}/api/profile`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profileAtStart),
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: new URL(APP).origin }, body: JSON.stringify(profileAtStart),
     }).catch(() => {});
   }
-  await browser.close();
-  if (serverProc) serverProc.kill();
+  await stopAll(browser);
 }
+
+// ---- Nothing left the PC -------------------------------------------------
+check('the app made no request to any outside host', outsideRequests.length === 0,
+  [...new Set(outsideRequests)].slice(0, 3).join(' | '));
+check('no screen shows the old product or maker name', oldNameSeen.length === 0, oldNameSeen.slice(0, 3).join(' | '));
+// The server's guards log beside its data folder: an outside connection it
+// blocked (egress guard) and any CSP report sent by the browser. Read once the
+// server has stopped, before the temporary folder is removed.
+if (smokeHome) {
+  const logOf = (name) => { try { return readFileSync(join(smokeHome, 'logs', name), 'utf8').trim(); } catch { return ''; } };
+  const egressLog = logOf('egress-guard.log');
+  const cspLog = logOf('csp.log');
+  check('the server tried no outside connection (egress-guard log empty)', !egressLog, egressLog.split('\n')[0].slice(0, 160));
+  check('the browser reported no CSP violation to the server (csp log empty)', !cspLog, cspLog.split('\n')[0].slice(0, 160));
+}
+removeSmokeHome();
 
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed\n`);

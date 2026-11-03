@@ -1,23 +1,25 @@
-// v1.10.33 — Bundle tesseract.js worker, core (WASM + JS glue), and the
-// English traineddata into public/tesseract/ so the OCR feature runs
-// fully offline. Runs at `npm install` time (postinstall) and again
-// before every build so a fresh clone or a bumped tesseract version
-// picks up the new files automatically.
+// Copy the OCR files into public/tesseract/ so the bill OCR screen runs
+// fully offline: the tesseract.js worker and WASM cores come from
+// node_modules, and the English language data from vendor/tessdata, whose
+// SHA-256 is pinned below. Runs before every build (prebuild) and every
+// dev start, so a fresh checkout or a bumped tesseract version picks up
+// the new files automatically.
 //
-// Prior to this, OCR fetched worker.min.js from jsdelivr, core wasm
-// from jsdelivr, and eng.traineddata.gz from tessdata.projectnaptha.com
-// at runtime — three network hops on every first use, subject to CSP,
-// CDN availability, corporate proxies, and offline conditions. The
-// user's report: "stuck on 0" was the traineddata download failing
-// silently after CSP was unblocked. Bundling eliminates the whole class.
+// Nothing is downloaded. A missing or altered language file, or a missing
+// tesseract.js install, stops the build with an error: before, a failed
+// download still "succeeded" and shipped an app whose OCR could not work.
 //
-// Size cost: ~35-40MB added to the built app (worker 110KB + all six
-// WASM cores 18MB + eng.traineddata.gz ~10MB). Only precached by the
-// service worker on demand (see vite.config.js workbox rules).
+// v1.10.33 history: OCR used to load the worker, the core and the language
+// data from public CDNs at runtime, three network hops on every first use
+// ("stuck on 0" when the language download was blocked). Bundling removed
+// the whole class.
+//
+// Size cost: ~25 MB added to the built app (worker 110KB + all WASM cores
+// ~18MB + eng.traineddata ~5MB). Not precached by the service worker; it
+// caches them on first use (see vite.config.js workbox rules).
 
-import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { copyFile, mkdir, readFile, readdir, stat } from 'node:fs/promises';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
@@ -28,76 +30,46 @@ const PUBLIC_DIR = join(REPO_ROOT, 'public', 'tesseract');
 const CORE_OUT = join(PUBLIC_DIR, 'core');
 const LANG_OUT = join(PUBLIC_DIR, 'lang');
 
-// jsDelivr mirror of tessdata_fast (int-format, ~10MB gzipped).
-// SHA-256 verified after download to guard against silent corruption
-// or an unexpected 200-status redirect page.
-const TRAINEDDATA_URL = 'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/eng.traineddata';
-const TRAINEDDATA_MIN_BYTES = 3_000_000; // eng ≈ 4MB; anything less is a redirect/error page
+// The vendored English model; its source is recorded in vendor/tessdata/SOURCE.txt.
+// Replace the file and this hash together, on purpose, or the build stops.
+// scripts/build-release-zip.mjs and scripts/verify-release.mjs import both.
+export const TRAINEDDATA_SOURCE = join(REPO_ROOT, 'vendor', 'tessdata', 'eng.traineddata');
+export const TRAINEDDATA_SHA256 = '5dc5d8d640a212c9d6184921ba103b186f50e0fed9ee716c53e6b312b400d747';
+
+const rel = (p) => relative(REPO_ROOT, p).split('\\').join('/');
 
 async function ensureDir(p) {
   await mkdir(p, { recursive: true });
 }
 
+async function exists(p) {
+  return stat(p).then(() => true, () => false);
+}
+
 async function copyIfExists(src, dst) {
-  try {
-    await stat(src);
-  } catch {
-    return false;
-  }
+  if (!(await exists(src))) return false;
   await ensureDir(dirname(dst));
   await copyFile(src, dst);
   return true;
 }
 
-async function alreadyDownloaded(target) {
-  try {
-    const s = await stat(target);
-    return s.size >= TRAINEDDATA_MIN_BYTES;
-  } catch {
-    return false;
+// Copy a package's licence file(s) next to the files copied from it.
+async function copyLicences(pkgDir, outDir) {
+  let copied = 0;
+  for (const name of await readdir(pkgDir).catch(() => [])) {
+    if (/^licen[cs]e/i.test(name) && await copyIfExists(join(pkgDir, name), join(outDir, name))) copied++;
   }
-}
-
-async function downloadTraineddata(target) {
-  if (await alreadyDownloaded(target)) {
-    console.log(`  ✓ eng.traineddata already present (${target})`);
-    return;
-  }
-  console.log(`  → fetching eng.traineddata from jsDelivr…`);
-  const res = await fetch(TRAINEDDATA_URL, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`Traineddata fetch failed: HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length < TRAINEDDATA_MIN_BYTES) {
-    throw new Error(`Traineddata suspiciously small (${buf.length} bytes) — likely a redirect page`);
-  }
-  await ensureDir(dirname(target));
-  await writeFile(target, buf);
-  const sha = createHash('sha256').update(buf).digest('hex').slice(0, 12);
-  console.log(`  ✓ eng.traineddata written (${(buf.length / 1024 / 1024).toFixed(1)}MB, sha256:${sha}…)`);
+  return copied;
 }
 
 async function main() {
-  // Skip if tesseract.js hasn't been installed yet — postinstall can fire
-  // before all deps are on disk in some npm topologies.
-  try {
-    await stat(join(NODE_MODULES, 'tesseract.js', 'dist', 'worker.min.js'));
-  } catch {
-    console.log('bundle-tesseract-assets: tesseract.js not installed yet, skipping');
-    return;
-  }
-
   // v1.10.69 - do nothing in an installed copy.
   //
-  // This runs from `postinstall`, so it also ran on every user's machine when
-  // the launcher installed the app. There it rebuilt public/tesseract/ from
-  // scratch - including a 3.9 MB download of eng.traineddata from jsDelivr -
-  // into a folder the packaged app never serves: a release install serves
-  // dist/, and dist/tesseract already carries every one of those files. So
-  // every user paid a few megabytes and an extra network round trip that
-  // could fail, for files they already had.
-  //
-  // A source checkout has public/ (it is in git). An installed copy does not.
-  // That is the difference, and it needs no new flag to detect.
+  // A release install serves dist/, and dist/tesseract already carries every
+  // one of these files, so there is nothing to rebuild there. A source
+  // checkout has public/ (it is in git); an installed copy does not. That is
+  // the difference, and it needs no new flag to detect. This check stays
+  // ahead of the language-file check below: an installed copy has no vendor/.
   const PUBLIC_ROOT = join(REPO_ROOT, 'public');
   const isSourceCheckout = await stat(PUBLIC_ROOT).then((s) => s.isDirectory()).catch(() => false);
   if (!isSourceCheckout) {
@@ -105,17 +77,41 @@ async function main() {
     return;
   }
 
+  // 1. English language data: vendored and pinned. Verified before anything
+  // is copied, so a bad file never reaches public/ or dist/.
+  const model = await readFile(TRAINEDDATA_SOURCE).catch(() => null);
+  if (!model) {
+    throw new Error(`${rel(TRAINEDDATA_SOURCE)} is missing. It is part of the repository; restore it from your copy of the repo.`);
+  }
+  const sha = createHash('sha256').update(model).digest('hex');
+  if (sha !== TRAINEDDATA_SHA256) {
+    throw new Error(
+      `${rel(TRAINEDDATA_SOURCE)} does not match its pinned SHA-256.\n` +
+      `    expected ${TRAINEDDATA_SHA256}\n` +
+      `    found    ${sha}\n` +
+      '    Restore the original file. If the model is being replaced on purpose, update\n' +
+      '    TRAINEDDATA_SHA256 in this script and vendor/tessdata/SOURCE.txt together.'
+    );
+  }
+
+  // 2. The worker and cores come from the installed tesseract.js packages.
+  const workerSrc = join(NODE_MODULES, 'tesseract.js', 'dist', 'worker.min.js');
+  if (!(await exists(workerSrc))) {
+    throw new Error('tesseract.js is not installed (node_modules/tesseract.js/dist/worker.min.js is missing). Run npm ci first.');
+  }
+
   console.log('Bundling tesseract assets into public/tesseract/');
   await ensureDir(PUBLIC_DIR);
   await ensureDir(CORE_OUT);
   await ensureDir(LANG_OUT);
 
-  // 1. Worker
-  const workerSrc = join(NODE_MODULES, 'tesseract.js', 'dist', 'worker.min.js');
+  // Worker, with its licence notices.
   await copyFile(workerSrc, join(PUBLIC_DIR, 'worker.min.js'));
+  await copyIfExists(join(NODE_MODULES, 'tesseract.js', 'dist', 'worker.min.js.LICENSE.txt'), join(PUBLIC_DIR, 'worker.min.js.LICENSE.txt'));
+  await copyLicences(join(NODE_MODULES, 'tesseract.js'), PUBLIC_DIR);
   console.log('  ✓ worker.min.js');
 
-  // 2. Core — copy ALL variants. tesseract picks at runtime based on
+  // Core — copy ALL variants. tesseract picks at runtime based on
   // WebAssembly SIMD feature detection; if only one is present the
   // wrong build will 404 on some browsers.
   const CORE_FILES = [
@@ -132,18 +128,33 @@ async function main() {
     const dst = join(CORE_OUT, f);
     if (await copyIfExists(src, dst)) coreCount++;
   }
+  if (coreCount === 0) {
+    throw new Error('No core files found in node_modules/tesseract.js-core. Run npm ci first.');
+  }
+  await copyLicences(join(NODE_MODULES, 'tesseract.js-core'), CORE_OUT);
   console.log(`  ✓ core files copied (${coreCount}/${CORE_FILES.length})`);
 
-  // 3. English traineddata — network fetch, but ONE time at install.
-  const langTarget = join(LANG_OUT, 'eng.traineddata');
-  await downloadTraineddata(langTarget);
+  // English language data, with its licence (Apache-2.0).
+  await copyFile(TRAINEDDATA_SOURCE, join(LANG_OUT, 'eng.traineddata'));
+  await copyIfExists(join(REPO_ROOT, 'vendor', 'tessdata', 'LICENSE'), join(LANG_OUT, 'LICENSE'));
+  console.log(`  ✓ eng.traineddata (${(model.length / 1024 / 1024).toFixed(1)}MB, SHA-256 verified)`);
 
   console.log('Done. Restart dev server / rebuild for changes to take effect.');
 }
 
-main().catch(err => {
-  console.error('bundle-tesseract-assets FAILED:', err.message || err);
-  // Do NOT fail install — the app will still work if the user has
-  // network at runtime. Just warn loudly.
-  process.exit(0);
-});
+// Run only when executed directly; the release scripts import the pin above.
+const isMain = (() => {
+  try {
+    return resolve(process.argv[1] || '').toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main().catch((err) => {
+    console.error(`bundle-tesseract-assets FAILED: ${err.message || err}`);
+    // Fail the build: an app without its OCR files breaks at the counter.
+    process.exit(1);
+  });
+}

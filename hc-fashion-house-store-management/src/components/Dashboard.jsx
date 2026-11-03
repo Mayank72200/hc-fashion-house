@@ -9,8 +9,6 @@ import LockButton from './LockButton';
 import ActionsMenu from './ActionsMenu';
 import BulkCsvImport from './BulkCsvImport';
 import PrintPreviewModal from './PrintPreviewModal';
-import SupportNudge from './SupportNudge';
-import WelcomeCard from './WelcomeCard';
 import { toast } from './Toast';
 import { confirmAction } from './ConfirmModal';
 
@@ -81,6 +79,23 @@ const PAYMENT_MODES = [
 ];
 const paymentModeName = (mode) => (PAYMENT_MODES.find(([v]) => v === mode) || [])[1] || mode;
 
+// WhatsApp share and reminders go through share.js, which hands the message to
+// the WhatsApp app and, when it cannot, copies it to be pasted. What it reports
+// back (a string, or an object with `message` or `copied`) is returned for a
+// toast; a window handle or nothing gives ''. share.js is called before the
+// first await, so it still runs inside the click.
+async function handOffToWhatsApp(phone, message) {
+  try {
+    const result = await openWhatsAppShare(phone, message);
+    if (typeof result === 'string') return result.trim();
+    if (result && typeof result === 'object') {
+      if (typeof result.message === 'string' && result.message.trim()) return result.message.trim();
+      if (result.copied === true) return 'Message copied - paste it in WhatsApp';
+    }
+  } catch { /* the hand-off failed, or a window of another site came back */ }
+  return '';
+}
+
 // v1.10.6 — audit L4: was a local copy of getFYOptions. Now imported
 // from ../utils so a bugfix touches one file, not five.
 
@@ -99,7 +114,8 @@ function ReceiptModal({ target, onClose }) {
   const clientName = bill.data?.client?.name || bill.clientName || 'Client';
   const clientAddress = bill.data?.client?.address || '';
   const clientPhone = bill.data?.client?.phone || '';
-  const receiptNo = `RCPT-${(payment.id || '').replace('pay_', '').toUpperCase().slice(0, 10)}`;
+  // The number its receipt carries (RCP/... for one made on the Receipts page).
+  const receiptNo = payment.receiptNo || `RCPT-${(payment.id || '').replace('pay_', '').toUpperCase().slice(0, 10)}`;
   const paymentModeLabel = {
     'bank-transfer': 'Bank Transfer', 'upi': 'UPI', 'cash': 'Cash',
     'cheque': 'Cheque', 'card': 'Card', 'other': 'Other',
@@ -202,8 +218,8 @@ function ReceiptModal({ target, onClose }) {
   );
 }
 
-export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConvert, onOpenProducts, onOpenSettings, onOpenGuide, onOpenSupport, activeProfile }) {
-  // v1.10.64 — requested (#55, @sangwanmail-eng): "An invoice belonging to one
+export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConvert, onOpenProducts, onOpenSettings, activeProfile }) {
+  // v1.10.64 — requested (#55): "An invoice belonging to one
   // company should not appear under the other."
   //
   // Bills and the active business load independently, so filtering at load
@@ -217,7 +233,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
   const [allBills, setBills] = useState([]);
   const [profileState, setProfileState] = useState(null);
 
-  // v1.10.65 — requested (#58 item 1, @sangwanmail-eng): "Dashboard should
+  // v1.10.65 — requested (#58 item 1): "Dashboard should
   // refresh automatically after company switch."
   //
   // It did not, because the dashboard fetched the business ONCE when it
@@ -241,7 +257,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
   // Outstanding and the invoice count added up EVERY company's invoices while
   // the table underneath showed only one.
   const stats = useMemo(() => {
-    // v1.10.67 (#66 item 7, @sangwanmail-eng) — these cards are turnover, so
+    // v1.10.67 (#66 item 7) — these cards are turnover, so
     // only real sales count. A proforma is a quote, a delivery challan moves
     // goods without selling them, a credit note takes money back, and a
     // cancelled document counts for nothing.
@@ -467,7 +483,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
     setFiltered(result);
   }, [bills, search, typeFilter, statusFilter, fyFilter, dateFrom, dateTo]);
 
-  // v1.10.67 (#66 item 12, @sangwanmail-eng) — an issued invoice is not
+  // v1.10.67 (#66 item 12) — an issued invoice is not
   // deleted: its number has to stay in the books, gapless, for GST. Cancelling
   // keeps the document and takes it out of every total and return. Any other
   // status from the dropdown brings it back.
@@ -608,10 +624,14 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       });
       if (!proceed) return;
     }
+    const paymentId = 'pay_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const paymentEntry = {
-      id: 'pay_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      id: paymentId,
       amount, date: paymentInput.date, mode: paymentInput.mode,
       note: paymentInput.note, recordedAt: new Date().toISOString(),
+      // The number of the receipt saved below, so the payment and its receipt
+      // also match by number (the Receipts page edits it by id first).
+      receiptNo: `RCPT-${paymentId.replace('pay_', '').toUpperCase().slice(0, 10)}`,
     };
     const payments = [...(bill.payments || []), paymentEntry];
     const totalPaid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -629,7 +649,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       await saveReceipt({
         id: paymentEntry.id,
         date: paymentEntry.date,
-        receiptNo: `RCPT-${paymentEntry.id.replace('pay_', '').toUpperCase().slice(0, 10)}`,
+        receiptNo: paymentEntry.receiptNo,
         clientName: bill.data?.client?.name || bill.clientName || '',
         clientAddress: bill.data?.client?.address || '',
         amount: paymentEntry.amount,
@@ -737,9 +757,12 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
     }
     const target = (bill.payments || [])[idx];
     const withId = target.id || ('pay_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    // A receipt made on the Receipts page keeps its own number (RCP/...). The
+    // payment carries the number too, like the receipt saved below.
+    const receiptNo = target.receiptNo || `RCPT-${withId.replace('pay_', '').toUpperCase().slice(0, 10)}`;
     const payments = (bill.payments || []).map((p, i) => i === idx
       // Edited by you, so no longer the automatic "Marked paid" payment (auto is dropped).
-      ? { ...p, id: withId, amount: newAmount, date: form.date, mode: form.mode, note: form.note, auto: false }
+      ? { ...p, id: withId, receiptNo, amount: newAmount, date: form.date, mode: form.mode, note: form.note, auto: false }
       : p);
     const totalPaid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     const status = paymentStatusFor(bill, totalPaid);
@@ -750,8 +773,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       await saveReceipt({
         id: withId,
         date: form.date,
-        // A receipt made on the Receipts page keeps its own number (RCP/...).
-        receiptNo: target.receiptNo || `RCPT-${withId.replace('pay_', '').toUpperCase().slice(0, 10)}`,
+        receiptNo,
         clientName: bill.data?.client?.name || bill.clientName || '',
         clientAddress: bill.data?.client?.address || '',
         amount: newAmount,
@@ -881,7 +903,8 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `freegstbill-bills-${sel.length}-${new Date().toISOString().split('T')[0]}.json`;
+    // Local date: toISOString() is UTC, still yesterday in India until 05:30.
+    a.download = `hc-fashion-house-bills-${sel.length}-${localToday()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast(`Exported ${sel.length} invoice${sel.length !== 1 ? 's' : ''} as JSON`, 'success');
@@ -915,6 +938,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       const { jsPDF } = await import('jspdf');
       const html2canvas = (await import('html2canvas')).default;
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+      doc.setProperties({ creator: 'HC Fashion House', author: 'HC Fashion House' });
       // Build each bill in a hidden container, snap it, add as a page.
       // Reuses InvoicePreview via a dynamic import so its CSS + fonts
       // are hydrated once, then reused for each iteration.
@@ -971,7 +995,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       if (window.__fgsbBulkAbort) { toast(`Aborted after ${ok} of ${sel.length}`, 'warning'); }
       window.__fgsbBulkAbort = false;
       if (ok === 0) { toast('Could not generate any PDFs', 'error'); return; }
-      const filename = `freegstbill-invoices-${ok}-${new Date().toISOString().split('T')[0]}.pdf`;
+      const filename = `hc-fashion-house-invoices-${ok}-${localToday()}.pdf`;
       doc.save(filename);
       toast(`Exported ${ok} of ${sel.length} invoices`, 'success');
     } catch (e) {
@@ -1030,6 +1054,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         scale: capScale, backgroundColor: '#ffffff', useCORS: false, logging: false,
       });
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+      doc.setProperties({ title: String(bill.invoiceNumber || ''), creator: 'HC Fashion House', author: 'HC Fashion House' });
       addCanvasAsA4Pages(doc, canvas, false, safeBreaks(container.firstElementChild || container, canvas));
       return doc.output('blob');
     } finally {
@@ -1084,7 +1109,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
     // v1.10.22 — try the native Web Share API first, with the actual PDF
     // attached. On mobile Chrome / Safari the share sheet lets the user
     // pick WhatsApp (or any other target). Falls through to the text-only
-    // wa.me URL on desktop and older browsers.
+    // WhatsApp hand-off (share.js) on desktop and older browsers.
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         toast('Preparing PDF for share…', 'info', 1500);
@@ -1101,20 +1126,20 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         }
       } catch (e) {
         // AbortError = user dismissed the share sheet; not an error.
-        if (e?.name !== 'AbortError') console.warn('Web Share failed, falling back to WhatsApp URL:', e);
+        if (e?.name !== 'AbortError') console.warn('Web Share failed, falling back to the WhatsApp hand-off:', e);
         else return;
       }
     }
-    // Fallback (desktop): WhatsApp Web cannot be handed a file by a web page
+    // Fallback (desktop): WhatsApp cannot be handed a file by a web page
     // (a browser security rule), so the PDF is downloaded and the client's
     // chat opened with the message, ready to drag the file in.
     // v1.10.81 (#117) - the client's saved number is used (it was only the
     // number on the invoice record, which is rarely set), and the PDF is
     // downloaded for them instead of "download it yourself".
     const phone = getClientPhone(bill);
-    // Opened first, while it still counts as the click: opened after the PDF
-    // is made, browsers block it as a popup.
-    openWhatsAppShare(phone, msg);
+    // Handed over first, while it still counts as the click: after the PDF
+    // is made, browsers refuse to open another app or window.
+    const handoff = handOffToWhatsApp(phone, msg);
     let downloaded = false;
     try {
       const blob = await generateSingleBillPdfBlob(bill);
@@ -1125,9 +1150,13 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       downloaded = true;
     } catch { /* PDF failed: still open the chat with the text */ }
+    // What share.js reported (for example that the message was copied
+    // instead) leads the toast.
+    const note = await handoff;
+    const lead = note ? `${/[.!?]$/.test(note) ? note : `${note}.`} ` : '';
     toast(downloaded
-      ? `PDF downloaded. Drag it into the WhatsApp chat${phone ? '' : ' (choose the contact there)'} — browsers can't attach it for you.`
-      : 'WhatsApp opened with the invoice details. Download the PDF from the invoice to send the file.', 'info', 7000);
+      ? `${lead}PDF downloaded. Drag it into the WhatsApp chat${phone ? '' : ' (choose the contact there)'} — browsers can't attach it for you.`
+      : `${lead || 'WhatsApp opened with the invoice details. '}Download the PDF from the invoice to send the file.`, 'info', 7000);
   };
 
   const shareEmail = (bill) => {
@@ -1178,7 +1207,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       : isOverdueDate
         ? `Hi ${clientName}, this is a gentle reminder that Invoice ${bill.invoiceNumber} for ${outstandingStr} was due on ${dueDate}. Kindly arrange the payment at your earliest convenience. Thank you! - ${businessName}`
         : `Hi ${clientName}, this is a gentle reminder about the pending payment of ${outstandingStr} on Invoice ${bill.invoiceNumber}. Kindly arrange the payment at your earliest convenience. Thank you! - ${businessName}`;
-    openWhatsAppShare(clientPhone, msg);
+    handOffToWhatsApp(clientPhone, msg).then((note) => { if (note) toast(note, 'info', 6000); });
   };
 
   const getClientPhone = (bill) => {
@@ -1233,12 +1262,12 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         title="Dashboard"
         subtitle="Overview of your invoices"
         meta={`${bills.length} invoice${bills.length === 1 ? '' : 's'}`}>
-        <HelpButton title="Dashboard — how to use" doc="dashboard">
+        <HelpButton title="Dashboard — how to use">
           <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
             <li><strong>New Invoice</strong> — start a fresh tax invoice / proforma / credit note / bill of supply / delivery challan.</li>
             <li><strong>Filter row</strong> — search by client name or invoice number; filter by financial year, type, status and date range. <strong>Columns</strong> picks what the list shows.</li>
             <li><strong>Row actions</strong> — 👁 View shows the invoice as it prints without opening the editor; Edit, ₹ Payment (records a payment and prints a receipt) and Convert sit beside it. The <strong>⋯</strong> menu has Duplicate, Print, WhatsApp, reminder, Email and Cancel. Cancelling keeps the invoice number but takes it out of totals and GST returns; undo it from the status dropdown.</li>
-            <li><strong>WhatsApp share — mobile vs. desktop:</strong> on Android / iPhone the PDF attaches automatically via the OS share sheet (works with WhatsApp, Signal, Telegram, anywhere). On desktop, browsers cannot hand a file to WhatsApp Web (a security rule), so the chat with the client opens with the invoice details and the PDF is downloaded: drag it into the chat. The client's saved phone number is used.</li>
+            <li><strong>WhatsApp share — mobile vs. desktop:</strong> on Android / iPhone the PDF attaches automatically via the OS share sheet (works with WhatsApp, Signal, Telegram, anywhere). On desktop, browsers cannot hand a file to WhatsApp (a security rule), so the chat with the client opens with the invoice details and the PDF is downloaded: drag it into the chat. The client's saved phone number is used.</li>
             <li><strong>Bulk actions</strong> — tick rows to mark them paid / unpaid / overdue, export them, combine them into one PDF, or cancel them. <strong>Quick print</strong> combines the filtered list into one PDF.</li>
             <li><strong>Overdue banner</strong> — click it to jump to overdue invoices with one tap.</li>
             <li><strong>Low-stock alert</strong> — appears when any product is at or below your threshold (Settings → Stock alert).</li>
@@ -1255,8 +1284,6 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
           two. This stays until the work is actually done, ticks itself off
           from real data rather than from "have you seen this screen", and
           removes itself for good once everything is set up. */}
-      {onOpenSupport && <WelcomeCard invoiceCount={bills.length} onOpenSupport={onOpenSupport} />}
-
       {startedSteps && (
         <div className="glass-panel p-6 mb-6">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.9rem' }}>
@@ -1287,17 +1314,8 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
               )}
             </div>
           ))}
-          <div style={{ marginTop: '0.9rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            New to this?{' '}
-            <button type="button" onClick={onOpenGuide}
-              style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'var(--primary)', textDecoration: 'underline', cursor: 'pointer' }}>
-              Read the 5-minute guide
-            </button>
-          </div>
         </div>
       )}
-
-      {!startedSteps && onOpenSupport && <SupportNudge invoiceCount={bills.length} onOpen={onOpenSupport} />}
 
       {overdueBills.length > 0 && (
         <div className="overdue-banner" onClick={() => { setStatusFilter('overdue'); }}
@@ -1677,7 +1695,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
                             { label: 'Duplicate', icon: Copy, onClick: () => onDuplicate(bill) },
                             { label: 'Print', icon: Printer, onClick: () => onPrint(bill), hidden: readOnly },
                             { label: 'WhatsApp', icon: MessageCircle, tone: 'green', onClick: () => shareWhatsApp(bill), hidden: readOnly,
-                              title: 'Share via WhatsApp — PDF attaches on mobile Chrome/Safari. On desktop it sends the invoice as text only (browser can\'t attach files to WhatsApp Web — security limitation, not our app).' },
+                              title: 'Share via WhatsApp — PDF attaches on mobile Chrome/Safari. On desktop it sends the invoice as text only (WhatsApp cannot take a file attached from the browser).' },
                             // v1.10.12 — reminder for unpaid, partial and overdue bills.
                             { label: status === 'partial' ? 'Reminder (partial pending)' : 'Send reminder', icon: Send, onClick: () => sendReminder({ ...bill, clientPhone: getClientPhone(bill) }),
                               hidden: readOnly || isCancelledBill(bill) || !(isOverdue || status === 'overdue' || status === 'unpaid' || status === 'partial') || !(amountDue(bill) - (bill.paidAmount || 0) > 0.01) },

@@ -227,7 +227,7 @@ export default function RecurringInvoices() {
             <h1 className="page-title">Recurring Invoices</h1>
             <p className="page-subtitle">Auto-generate invoices for retainer clients</p>
           </div>
-          <HelpButton title="Recurring invoices — how to use" doc="recurring">
+          <HelpButton title="Recurring invoices — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>Easiest</strong>: make the first invoice as usual and tick <em>Make this a recurring invoice</em> under Customize. Taxes, terms and options carry over.</li>
               <li>Or use <strong>New Template</strong> here. <em>Every</em> and <em>Stop</em> set how often it repeats and when it ends.</li>

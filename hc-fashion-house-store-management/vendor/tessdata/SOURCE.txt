@@ -1,0 +1,7 @@
+eng.traineddata - Tesseract OCR English LSTM model (integer "best_int" variant), used by the bill OCR screen.
+Source: npm package @tesseract.js-data/eng@1.0.0, file 4.0.0_best_int/eng.traineddata.gz, decompressed with gunzip.
+npm integrity of the package: sha512-mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg==
+SHA-256 of eng.traineddata: 5dc5d8d640a212c9d6184921ba103b186f50e0fed9ee716c53e6b312b400d747
+Size: 5199098 bytes
+Licence: Apache License 2.0 (Tesseract OCR language data). See LICENSE in this folder.
+Retrieved: 2026-11-02. scripts/bundle-tesseract-assets.mjs copies this file and verifies the SHA-256; nothing is downloaded at build time.

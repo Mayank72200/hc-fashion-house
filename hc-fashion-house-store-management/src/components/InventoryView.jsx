@@ -219,7 +219,7 @@ export default function InventoryView() {
             <h1 className="page-title">Products</h1>
             <p className="page-subtitle">Manage your products and services catalog</p>
           </div>
-          <HelpButton title="Products — how to use" doc="products">
+          <HelpButton title="Products — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>Add Product</strong>: name, HSN/SAC, purchase and selling price, GST %, unit and stock. Typing the name on an invoice fills the rest in.</li>
               <li><strong>Stock</strong> goes down when you save an invoice and up when you save a purchase bill.</li>

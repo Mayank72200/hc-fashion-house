@@ -1,10 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Upload, Loader, Wand2, Package, Sparkles, Trash2, Plus } from 'lucide-react';
 import { toast } from './Toast';
-// v1.10.29 — Pull the installed tesseract.js version straight from its
-// package.json so that when we `npm update tesseract.js`, the CDN paths
-// track automatically. Vite handles JSON imports natively — no bundle
-// bloat beyond the version string.
 // v1.10.35 — Match extracted product names against the saved catalog
 // so users don't retype HSN + GST for products they already have.
 import { getAllProducts } from '../store';
@@ -24,15 +20,15 @@ import { getAllProducts } from '../store';
  *   - Grand total    — the number labelled "Total", "Grand Total", or
  *                      "Amount Payable", with rupee-format tolerance.
  *
- * Line items are NOT auto-parsed — table extraction from OCR text is
- * unreliable across bill layouts and misrouted ITC is worse than a slow
- * manual entry. User confirms the extracted header fields and fills line
- * items themselves.
+ * Line items are parsed heuristically as well (v1.10.35, parseLineItems
+ * below). Table extraction from OCR text is unreliable across bill layouts
+ * and misrouted ITC is worse than a slow manual entry, so the user reviews
+ * every extracted field and row before applying them.
  *
- * Tesseract.js runs entirely client-side (WebAssembly). No network
- * calls to a paid OCR provider, so the offline-first + free positioning
- * of the app is preserved. First run downloads ~2MB of language data
- * to browser cache; subsequent runs are instant.
+ * Tesseract.js runs entirely client-side (WebAssembly). Its worker, core
+ * and English language data are served by this app from /tesseract/ (see
+ * runOCR), so OCR makes no outside connection and nothing is sent to an
+ * OCR service. The browser may cache the language data after the first run.
  */
 
 // GSTIN: 2-digit state code + 5 letters + 4 digits + 1 letter + entity
@@ -345,33 +341,19 @@ export default function BillOCR({ onClose, onExtracted }) {
     // v1.10.29 — reported: "ocr is not working". Common failure modes with
     // tesseract.js v7 in a Vite bundle:
     //   (a) worker.js path resolution fails after production build
-    //   (b) eng.traineddata CDN fetch blocked by corporate proxy / offline
+    //   (b) the language data cannot be fetched
     //   (c) SharedArrayBuffer unavailable without cross-origin-isolated headers
-    // Now: pin corePath / workerPath / langPath to jsdelivr CDN explicitly
-    // (tesseract.js's built-in path resolution is fragile in bundlers), catch
-    // the actual error message, and surface it to the user so they know
-    // whether to retry, check network, or report a bug.
+    // Now: pin corePath / workerPath / langPath explicitly (tesseract.js's
+    // built-in path resolution is fragile in bundlers), catch the actual
+    // error message, and surface it to the user so they know whether to
+    // retry or report a bug.
     let worker = null;
     try {
       const Tesseract = await import('tesseract.js');
-      // v1.10.29 — Version pulled from tesseract's own package.json so CDN
-      // paths stay in sync on future npm updates.
-      // v1.10.31 — CORE VERSION FIX (root cause of "OCR is not working"
-      // through v1.10.30). tesseract.js v7 depends on tesseract.js-core@^7,
-      // not @6. Hardcoded @6.0.0 in the CDN URL 404'd (or loaded an ABI-
-      // incompatible core), causing the worker to fail during importScripts
-      // before recognition could start. Now derived from the SAME
-      // package.json so it tracks tesseract's version automatically. In the
-      // audit sanity check: node_modules/tesseract.js/package.json says
-      // "tesseract.js-core": "^7.0.0" — matches what's installed and what
-      // tesseract's own default corePath would resolve.
-      // v1.10.33 — All tesseract assets are now bundled with the app
-      // (see scripts/bundle-tesseract-assets.mjs). Prior CDN paths
-      // caused three failure modes: (a) CSP blocked blob workers even
-      // after fix, (b) cnd.jsdelivr resolved @${version} to a 404 when
-      // tesseract.js-core's version drifted from tesseract.js's, (c) a
-      // ~10MB traineddata download stalled at "0%" behind flaky mobile
-      // networks. Local paths eliminate all three. Zero network at run.
+      // v1.10.33 — All tesseract assets are bundled with the app (see
+      // scripts/bundle-tesseract-assets.mjs) and served by its own local
+      // server. Every path below is set, so tesseract.js never falls back
+      // to its built-in remote defaults. Zero network at run.
       //
       // Assets live under /tesseract/ (served from public/tesseract/):
       //   /tesseract/worker.min.js
@@ -419,8 +401,8 @@ export default function BillOCR({ onClose, onExtracted }) {
       if (msg === 'undefined' || msg === '{}' || !msg.trim()) msg = 'Unknown error (see browser console — F12 — for details)';
 
       let hint = 'Try a sharper photo, or open the browser console (F12) for the full error.';
-      if (/fetch|network|Failed to fetch|CDN|502|503|504/i.test(msg)) hint = 'Network fetch failed — OCR needs to download ~2MB of language data on first use. Check your connection and try again in a moment.';
-      else if (/worker|SharedArrayBuffer|not defined/i.test(msg)) hint = 'Tesseract worker failed to load. Hard-refresh (Ctrl+F5) to fetch a clean bundle. If it keeps failing, the app may need HTTPS + COOP/COEP headers for tesseract v7.';
+      if (/fetch|network|Failed to fetch|CDN|502|503|504/i.test(msg)) hint = 'Could not load the OCR files from this app. Check that the app is still running, then hard-refresh (Ctrl+F5) and try again. If it keeps failing, contact your HC Fashion House administrator.';
+      else if (/worker|SharedArrayBuffer|not defined/i.test(msg)) hint = 'The OCR engine failed to load. Hard-refresh (Ctrl+F5) to reload the app. If it keeps failing, contact your HC Fashion House administrator.';
       else if (/blob|image|decode|corrupt|invalid/i.test(msg)) hint = 'Could not decode the image. Try a JPG or PNG under 8MB, taken with good lighting.';
       else if (/timeout|timed out/i.test(msg)) hint = 'OCR timed out. Image may be too large — try cropping to just the invoice header.';
 

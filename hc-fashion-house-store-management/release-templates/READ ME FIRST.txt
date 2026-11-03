@@ -1,10 +1,10 @@
 ===========================================================
-  FREE GST BILLING SOFTWARE
-  By DiceCodes - free, and yours to keep
+  HC FASHION HOUSE
+  Billing and store management - read this first
 ===========================================================
 
-  Your invoices, clients and data stay on THIS computer.
-  Nothing is uploaded. No account. No monthly fee.
+  Your invoices, customers and settings stay on THIS
+  computer. The app runs without the internet.
 
 
 -----------------------------------------------------------
@@ -15,7 +15,7 @@
   extract it first. The app cannot run from inside a ZIP.
 
     1. Close this window.
-    2. Right-click the ZIP file you downloaded.
+    2. Right-click the HC-Fashion-House ZIP file.
     3. Choose "Extract All..." then "Extract".
     4. Open the new folder that appears.
 
@@ -24,209 +24,215 @@
 
 
 -----------------------------------------------------------
-  STEP 2 - OPEN THE LAUNCHER FOR YOUR COMPUTER
+  STEP 2 - OPEN THE LAUNCHER AND CLICK INSTALL
 -----------------------------------------------------------
 
-  Double-click the one that matches your computer:
+  Double-click "HC Fashion House - WINDOWS". A small window
+  opens with one button: click "Install".
 
-    Windows ..... Free GST Billing - WINDOWS
-    Mac ......... Free GST Billing - MAC
-    Linux / NAS . Free GST Billing - LINUX
+  There is nothing to fill in and nothing is downloaded -
+  everything the app needs is inside the ZIP. Install
+  copies the app to this PC's own program folder:
 
-  A small window opens with one button.
+    %LOCALAPPDATA%\Programs\HC Fashion House
 
-  MAC: install Node.js first (free): https://nodejs.org ->
-  macOS Installer (LTS). Then hold Control, click
-  "Free GST Billing - MAC" and choose Open, then Open again.
-  A Terminal window asks "Install now? [Y/n]": press Return.
+  That folder is on this PC only - not OneDrive, not the
+  Desktop, not Documents. Then the app opens in your web
+  browser by itself. A black window appears while it
+  works. Leave it alone - it closes on its own.
 
-  LINUX: see the step-by-step guide below.
+  You do NOT need administrator rights. Install adds a
+  Desktop shortcut and a Start Menu entry, both called
+  "HC Fashion House". Everything else stays in the program
+  folder.
 
-  STEP-BY-STEP GUIDES, for every computer, with every click
-  explained (no technical knowledge needed):
-  https://dicecodes.com/free-gst-software-documentation/install.html
+  Windows may warn "Windows protected your PC" because the
+  launcher is not code-signed. Click "More info", then
+  "Run anyway".
 
-
------------------------------------------------------------
-  STEP 3 - CLICK INSTALL, THEN WAIT
------------------------------------------------------------
-
-  Click "Install". There is nothing to fill in.
-
-  It downloads what the app needs (about 30 MB the first
-  time), sets everything up, and then opens the app in your
-  web browser by itself. Takes 1 to 3 minutes.
-
-  A black window appears while it works. Leave it alone -
-  it closes on its own.
-
-  You do NOT need administrator rights. Nothing is added to
-  Windows outside this folder.
-
-  Windows may warn "Windows protected your PC" because this
-  app is not code-signed (a certificate costs about $300 a
-  year, which would defeat the word "free"). Click
-  "More info", then "Run anyway".
+  Afterwards the folder you extracted is not needed any
+  more. You can delete it.
 
 
 -----------------------------------------------------------
-  FROM NOW ON
+  EVERY DAY - START AND STOP THE APP
 -----------------------------------------------------------
 
-  A "Free GST Billing" shortcut is put on your Desktop.
-  Use that to open the app every day.
+  START: double-click the "HC Fashion House" shortcut on
+  the Desktop, then click "Open App". The app opens in
+  your web browser at:
 
-  You can also open the launcher again any time. It is your
-  Open button, your Update button and your Backup button,
-  all in one file:
+    http://localhost:47371
 
-    Open App .......... starts the app
-    More options ...... Update, Back up, Restore,
-                        Move to another PC, Stop
+  STOP: open the launcher again (the same shortcut), click
+  "More options", then "Stop the app". Inside the app,
+  Control Panel -> Stop Server does the same.
 
+  The launcher's "More options" also has:
 
------------------------------------------------------------
-  YOUR FIRST INVOICE, IN 5 MINUTES
------------------------------------------------------------
-
-  1. The first time it opens, a short wizard asks for your
-     business name, address and GSTIN. Fill it in - this is
-     what prints at the top of every invoice. You can change
-     it later in Settings.
-
-  2. Click "+ New Invoice" at the top.
-
-  3. Type your client's name. Enter their GSTIN and the
-     state fills in by itself.
-
-  4. Add what you sold: description, quantity, rate, tax %.
-     The GST is worked out for you - CGST + SGST inside your
-     state, IGST outside it.
-
-  5. Click "Download PDF". The invoice is saved and numbered
-     automatically.
-
-  That is a complete, GST-compliant tax invoice.
+    Back up my data .......... saves a backup ZIP
+    Restore a backup ......... puts a backup ZIP back
+    Move to another PC ....... a ZIP to take to a new PC
+    Open the backups folder .. shows the backup ZIPs
+    Stop the app ............. stops the app
+    Uninstall ................ removes the program and
+                               keeps your books
 
 
 -----------------------------------------------------------
-  WHERE IS MY DATA?
+  WHERE IS MY DATA? WHERE DO BACKUPS GO?
 -----------------------------------------------------------
 
-  In the "_system\data" folder, inside this folder. Plain
-  files on your own disk - you can copy them anywhere.
+  Everything is in the program folder,
+  %LOCALAPPDATA%\Programs\HC Fashion House :
 
-  Back it up with "More options -> Back up my data", which
-  writes a ZIP to:
+    _system\data ............. invoices, customers,
+                               settings
+    _system\Saved Invoices ... saved invoice PDFs
+    Backups .................. backup and Move ZIPs
 
-    Documents\FreeGSTBill Backups
+  "_system" is hidden: in File Explorer click View ->
+  Show -> Hidden items to see it.
 
-  Updating the app NEVER touches your data, and the updater
-  takes its own backup before it starts.
+  "Back up my data" writes a ZIP of the data folder into
+  the Backups folder. Copy the newest one to a USB drive
+  every week and keep the drive somewhere safe. Do not put
+  backup ZIPs on OneDrive and do not e-mail them: each one
+  holds your whole books.
+
+  The app also copies your data every day by itself, and
+  can put a second copy on a USB drive or a second disk:
+  Settings -> Backup Management.
 
 
 -----------------------------------------------------------
-  IF SOMETHING GOES WRONG - FIX IT YOURSELF
+  RESTORE A BACKUP
+-----------------------------------------------------------
+
+    1. Open the launcher -> More options ->
+       Restore a backup.
+    2. Pick the backup ZIP (they are in the Backups folder).
+    3. Check the numbers it shows, then click Yes.
+
+  The app stops, your current data is saved first as
+  "pre-restore-<date>.zip" in the Backups folder, and then
+  the backup is put in place. When the window says Done,
+  open the app again.
+
+  Inside the app, Control Panel -> Choose Backup ZIP works
+  the same way: the app closes while the restore runs.
+  Open it again when the restore window says Done.
+
+  A ZIP that is not an HC Fashion House backup is refused,
+  and nothing is changed.
+
+
+-----------------------------------------------------------
+  MOVE TO ANOTHER PC
+-----------------------------------------------------------
+
+    1. Old PC: More options -> Move to another PC. It saves
+       MOVE-HCFashionHouse-<date>.zip in the Backups folder.
+    2. Copy that ZIP to a USB drive.
+    3. New PC: install HC Fashion House (STEP 1 and 2).
+    4. New PC: More options -> Restore a backup -> pick the
+       MOVE ZIP.
+
+  Saved invoice PDFs are not in backup or Move ZIPs. To
+  take them along, copy the "_system\Saved Invoices" folder
+  as well.
+
+
+-----------------------------------------------------------
+  IF SOMETHING GOES WRONG
 -----------------------------------------------------------
 
   Find the message you see. Your invoices are never lost
-  by any of these: they stay in "_system\data".
+  by any of these.
 
-  "Some files are missing" / "extract the ZIP first"
+  "Please extract the ZIP first" / "Some files are missing"
       The ZIP was not fully extracted, or the launcher was
       opened from inside the ZIP. Go back to STEP 1.
 
+  "Part of the app is missing"
+      Files inside "_system" are gone - often removed by an
+      antivirus. Ask for a fresh copy of the ZIP (see
+      "Still stuck?" below).
+
+  "Already installed on this computer"
+      You opened the launcher of a new ZIP. Keep using the
+      installed copy from the Desktop shortcut. The new
+      folder is not needed; you can delete it.
+
   "Windows protected your PC"
-      Click "More info", then "Run anyway" (see STEP 3).
+      Click "More info", then "Run anyway" (see STEP 2).
 
-  Mac: "could not be executed because you do not have
-  appropriate access privileges"
-      Open Terminal (Applications -> Utilities), type
-      chmod +x  (with a space after it), drag the file
-      "Free GST Billing - MAC" into the Terminal window,
-      press Enter, then open the file again.
-
-  Mac: "cannot be opened because Apple cannot check it" /
-  "unidentified developer"
-      The app is not signed by Apple. Hold Control and click
-      "Free GST Billing - MAC", choose Open, then Open again.
-      Only the first time. (Or: System Settings -> Privacy &
-      Security -> Open Anyway.)
-
-  "Node.js ... is too old", "npm ERR!", or a file called
-  "npm-debug.log" in the _system folder
-      This PC has an old Node.js (the engine the app runs
-      on). Version 1.10.81 and later set up a new one inside
-      this folder by themselves: just click Install or Open
-      App again. On an older version:
-        1. Install "Node.js LTS" from https://nodejs.org
-           (default options).
-        2. Open the "_system" folder. It is hidden: in File
-           Explorer click View -> Show -> Hidden items.
-        3. Delete the folder "node_modules" ONLY.
-           Never delete the "data" folder.
-        4. Open the launcher and click Install.
-
-  "could not install the app's dependencies" /
-  "cannot reach the internet"
-      The first install needs the internet. Check the
-      connection (open any website). At an office, a proxy
-      or firewall may block registry.npmjs.org. Then click
-      Install again - it carries on where it stopped.
+  "This folder syncs to the cloud"
+      The app is inside OneDrive, the Desktop or Documents,
+      so your books are copied to the cloud. Ask your
+      administrator to move it to the program folder.
 
   "Still starting..." / "The server has not answered in
   90 seconds"
-      The first start after an install or update is slow
-      (antivirus checks every new file). Wait a minute and
-      open http://localhost:47371 in your browser. Still
+      The first start after an install is slow (antivirus
+      checks every new file). Wait a minute and open
+      http://localhost:47371 in your browser. Still
       nothing? Close the black window and click Open App
       again.
-
-  "Free GST Billing is already installed on this computer"
-      You extracted a new ZIP into a new folder. Your
-      invoices are in the folder it names. Open that copy
-      from your Desktop shortcut and use More options ->
-      Update to the latest version. Delete the new folder.
-
-  "The app cannot write to its own folder"
-      Do not keep it in C:\Program Files. Move the whole
-      Free-GST-Billing folder to Documents or D:\ and open
-      it from there.
-
-  "Drive ... is almost full"
-      The install needs about 400 MB free. Empty the
-      Recycle Bin or delete old downloads.
-
-  "Node.js was downloaded but will not run"
-      Your antivirus removed it. Add this folder to the
-      antivirus exclusions and click Install again.
 
   "Cannot connect to server" / "This site can't be
   reached" / a blank page
       The app is not running. Open the Desktop shortcut and
       click "Open App".
 
-  The update finished but the app looks the same
+  "The app cannot write to its own folder"
+      An antivirus setting ("controlled folder access") or
+      a read-only drive blocks the program folder. Allow
+      the folder in the antivirus, then try again.
+
+  "Drive ... is almost full"
+      The app needs about 400 MB free. Empty the Recycle
+      Bin or delete old downloads.
+
+  The app looks the same after a new version was installed
       Reload the page with Ctrl + F5.
 
-  Forgot the PIN?
-      In this folder (next to the launcher) make a new text
-      file named RESET-PIN, then reload the app. The PIN is
-      removed; your invoices are not touched.
-
   Still stuck?
-      Report it here, with a screenshot (hide your GSTIN and
-      bank details) and the message you see:
-      https://github.com/IamRamgarhia/Free-GST-Billing-Software/issues/new?template=bug_report.yml
+      Contact your HC Fashion House administrator. Tell
+      them the message you see; a photo of the screen
+      helps.
 
-      Fixes come in the Saturday update - one every week -
-      and anything urgent straight away.
 
-      The full guide, with every screen explained:
-      https://dicecodes.com/free-gst-software-documentation/
+-----------------------------------------------------------
+  FOR THE ADMINISTRATOR
+-----------------------------------------------------------
+
+  Installing a new version (the app never updates itself):
+
+    1. Launcher -> More options -> Back up my data. Copy
+       the newest ZIP from the Backups folder to a USB
+       drive.
+    2. Launcher -> More options -> Uninstall. Only the
+       program and its shortcuts go; the books, the saved
+       PDFs and the Backups folder stay.
+    3. Extract the new HC-Fashion-House ZIP, open its
+       launcher and click Install. It finds the books in
+       the program folder and keeps using them.
+    4. Open the app and check the version under About.
+
+  Optional - block the app's own Node.js from the internet
+  with a Windows Firewall rule. The app only talks to this
+  PC, so nothing changes for staff. Run PowerShell as
+  administrator, put the shop user's folder name in place
+  of <user>, and enter:
+
+    New-NetFirewallRule -Direction Outbound -Action Block `
+      -DisplayName "HC Fashion House - block app Node outbound" `
+      -Program "C:\Users\<user>\AppData\Local\Programs\HC Fashion House\_system\node\node.exe" `
+      -Profile Any
 
 
 ===========================================================
-  This software is free and open source (MIT licence).
-  If it saves you money, tell another shop owner about it.
+  HC Fashion House includes open-source components; their
+  licences are in the _system folder.
 ===========================================================

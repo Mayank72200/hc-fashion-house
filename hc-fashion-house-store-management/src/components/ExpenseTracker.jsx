@@ -257,7 +257,7 @@ export default function ExpenseTracker() {
             <h1 className="page-title">Expenses</h1>
             <p className="page-subtitle">Track business expenses for P&L and ITC claims</p>
           </div>
-          <HelpButton title="Expenses — how to use" doc="expenses">
+          <HelpButton title="Expenses — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li>For costs that are not stock: rent, electricity, internet, software, travel, fees.</li>
               <li><strong>Amount</strong> is what you paid, including GST. Enter the <strong>GST %</strong> and the GST inside it is worked out and counted as input tax credit.</li>

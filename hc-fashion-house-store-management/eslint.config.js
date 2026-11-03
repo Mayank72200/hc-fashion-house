@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   // Build output and generated / copied files, as in .gitignore: linting them
   // buried the real problems under ~2,000 errors from minified code.
-  globalIgnores(['dist', 'release-build', 'public/tesseract', 'docs-site/out', '.claude', 'data']),
+  globalIgnores(['dist', 'release-build', 'public/tesseract', '.claude', 'data']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -41,7 +41,14 @@ export default defineConfig([
   },
   // The server and the build / test scripts run in Node, not the browser.
   {
-    files: ['server.js', 'scripts/**/*.{js,mjs}', 'tests/**/*.{js,mjs}', 'docs-site/*.mjs', 'docs-site/pages/*.mjs'],
+    files: ['server.js', 'egress-guard.mjs', 'vite.config.js', 'scripts/**/*.{js,mjs}', 'tests/**/*.{js,mjs}'],
     languageOptions: { globals: { ...globals.node } },
+  },
+  // The egress guard is security code that loads before the server: it gets
+  // the recommended rules too (the first block covers .js and .jsx only).
+  {
+    files: ['egress-guard.mjs'],
+    extends: [js.configs.recommended],
+    rules: { 'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }] },
   },
 ])

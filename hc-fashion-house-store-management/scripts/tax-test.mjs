@@ -29,7 +29,6 @@ import {
   invoiceOptionOn,
   filledOrderDetails,
   formatShortDate,
-  docsLink,
   TCS_SECTIONS,
   INVOICE_TYPES,
   printedSubtotal,
@@ -66,8 +65,6 @@ import {
 import { splitPurchaseTax } from '../src/utils.js';
 import { buildXlsx, colName } from '../src/utils/xlsx.js';
 import { bulkRowToProduct, closingStock, stockValueOf } from '../src/utils/products.js';
-import { upiNote, parseSupporters, shouldShowSupportNudge } from '../src/utils/supporters.js';
-import { parseChangelog, inlineParts } from '../src/utils/changelog.js';
 import { unzipSync, strFromU8 } from 'fflate';
 import {
   compute44AE,
@@ -676,7 +673,7 @@ console.log('\n[V71] Income tax: bank categories and the ITR-4 80D line');
 }
 
 
-console.log('\n[V73] Customize options, order details, Quotation, docs links');
+console.log('\n[V73] Customize options, order details, Quotation, TCS sections');
 {
   eq(invoiceOptionOn({}, 'showLogo'), true, 'An option never saved is on by default');
   eq(invoiceOptionOn({}, 'showRoundOff'), false, 'Round-off is off unless chosen');
@@ -694,8 +691,6 @@ console.log('\n[V73] Customize options, order details, Quotation, docs links');
   eq(INVOICE_TYPES.quotation.prefix, 'QUO', 'Quotations number as QUO');
   eq(salesSign({ invoiceType: 'quotation', totalAmount: 100 }), 0, 'A quotation is not a sale');
 
-  eq(docsLink('invoices#toolbar'), 'https://dicecodes.com/free-gst-software-documentation/invoices.html#toolbar', 'Help links go to the docs section');
-  eq(docsLink('index'), 'https://dicecodes.com/free-gst-software-documentation/', 'The docs home link');
   eq(TCS_SECTIONS.some((t) => t.code === '206C(1H)'), false, '206C(1H) (omitted from 1 April 2025) is not offered on new invoices');
 }
 
@@ -1009,42 +1004,6 @@ console.log('\n[Audit 2026-10] Income tax marginal relief');
   approx(compute234BInterest(sched, '2026-06-10'), 3000, '234B: ₹1L all paid in June -> 1% x 3 months (paying late no longer wipes it out)');
 }
 
-console.log('\n[V80] Support page: UPI payment note and the supporters tracker');
-{
-  eq(upiNote('Kaveri Stationers'), 'Free GST Billing support - Kaveri Stationers', 'The payment note names the business that paid');
-  eq(upiNote(''), 'Free GST Billing support', 'No business name: the plain note');
-  eq(upiNote('M/S Sharma & Sons #12'), 'Free GST Billing support - M S Sharma Sons 12', 'Characters some UPI apps refuse are dropped');
-  eq(upiNote('A Very Long Business Name Private Limited Company of India').length <= 50, true, 'The note is kept to 50 characters');
-
-  const t = parseSupporters({ totalReceived: 12450.4, supporters: 37, goal: { amount: 50000, label: 'Balance sheet' }, thanks: ['Asha', '  Ravi  ', 42, ''], updated: '2026-10-19' });
-  eq([t.totalReceived, t.supporters, t.goal, t.thanks, t.updated], [12450, 37, { amount: 50000, label: 'Balance sheet' }, ['Asha', 'Ravi'], '2026-10-19'], 'The tracker file is read: total, supporters, goal, names');
-  eq([parseSupporters(null), parseSupporters([]), parseSupporters({ totalReceived: -5 }), parseSupporters({ totalReceived: 'lots' })], [null, null, null, null], 'A missing or broken file shows nothing');
-  const odd = parseSupporters({ totalReceived: 10, supporters: 'many', goal: { amount: 0 }, thanks: 'Asha', updated: 'yesterday' });
-  eq([odd.supporters, odd.goal, odd.thanks, odd.updated], [null, null, [], ''], 'Odd values are left out, never shown as they are');
-  eq(parseSupporters({ totalReceived: 1, thanks: ['<img src=x onerror=alert(1)>'.repeat(5)] }).thanks[0].length, 60, 'Names are cut to 60 characters (and shown as text, never HTML)');
-
-  // Daily support card on the Dashboard.
-  const day = new Date(2026, 9, 24, 10, 0);
-  const show = (n, st, at = day) => shouldShowSupportNudge(n, st, at);
-  eq([show(9, {}), show(10, {})], [false, true], 'The daily card waits for 10 invoices');
-  eq(show(50, { hiddenOn: '2026-10-24' }), false, '"Not today" hides it for the rest of the day');
-  eq(show(50, { hiddenOn: '2026-10-24' }, new Date(2026, 9, 25, 0, 5)), true, 'It is back the next morning (local date, not UTC)');
-  eq([show(50, { snoozedUntil: day.getTime() + 1 }), show(50, { snoozedUntil: day.getTime() - 1 })], [false, true], '"Hide for 30 days" holds until the date passes');
-  eq(show(500, { never: true }), false, 'The old "Don\'t show again" is still honoured');
-  eq(show(50, { snoozedAt: day.getTime() }), true, 'The old 120-day snooze no longer hides it');
-}
-
-console.log('\n[V83] Supporters with their amounts');
-{
-  const t = parseSupporters({ totalReceived: 804, supporters: 2, thanks: ['A', 'B'], people: [
-    { name: 'Kuldeep Suthar', amount: 101, date: '2026-10-29' }, { name: '  Niraj  Kumar ', amount: 501.4 },
-    { name: '', amount: 5 }, { name: 'Bad', amount: -1 }, { name: 'Text', amount: 'lots' }, 'junk', null,
-  ] });
-  eq(t.people, [{ name: 'Kuldeep Suthar', amount: 101, date: '2026-10-29' }, { name: 'Niraj Kumar', amount: 501, date: '' }],
-    'Each supporter with amount and date; blank, negative and broken entries are left out');
-  eq(parseSupporters({ totalReceived: 10, thanks: ['A'] }).people, [], 'An older file (names only) still works: no amounts');
-}
-
 console.log('\n[V83] #117 Purchases: CGST + SGST, or IGST');
 {
   const s = (tax, inter) => { const x = splitPurchaseTax(tax, inter); return [x.cgst, x.sgst, x.igst]; };
@@ -1053,22 +1012,6 @@ console.log('\n[V83] #117 Purchases: CGST + SGST, or IGST');
   eq(s(10.01, false), [5.01, 5, 0], 'An odd paisa: CGST + SGST still add up to the tax exactly');
   eq(s(0.03, false).reduce((a, b) => a + b, 0), 0.03, 'Tiny amounts add up too');
   eq(s(undefined, false), [0, 0, 0], 'No tax: zeros, never NaN');
-}
-
-console.log('\n[V81] What\'s new: the changelog on the Support page');
-{
-  const md = `# Changelog\n\n---\n\n## [1.10.82] - unreleased\n\n**Not out yet.**\n\n## [1.10.81] - 2026-10-31\n\n**Checks your PC first.**\n\n### How to update\n\n1. Click Update.\n#### On 1.10.72 or older\nUse the launcher.\n\n### Fixed\n- **Old Node.js** (#109): fixed.\n  - Node.js 18 or newer,\n    with npm 7.\n  - Windows 10 or 11.\n- CSV dates\n  read day first.\n\n---\n\n## [1.10.80] - 2026-10-24\n\n**CSV import.**\n\n### Added\nSee the list.\n- Lock button.\n`;
-  const e = parseChangelog(md);
-  eq(e.map((x) => `${x.version} ${x.date}`), ['1.10.81 2026-10-31', '1.10.80 2026-10-24'], 'Released versions only, newest first (an unreleased entry is left out)');
-  eq([e[0].summary, e[0].sections.map((s) => s.title)], ['Checks your PC first.', ['Fixed']], 'The summary, and no "How to update" section');
-  eq(e[0].sections[0].blocks, [
-    { kind: 'item', text: '**Old Node.js** (#109): fixed.', children: ['Node.js 18 or newer, with npm 7.', 'Windows 10 or 11.'] },
-    { kind: 'item', text: 'CSV dates read day first.', children: [] },
-  ], 'Items, nested items and wrapped lines');
-  eq(e[1].sections[0].blocks.map((b) => b.kind), ['para', 'item'], 'A plain line is a paragraph');
-  eq(inlineParts('**B** *i* `c` [x](https://a.b) [y](docs/z.md) [j](javascript:alert(1))').map((p) => p.t),
-    ['b', 'text', 'i', 'text', 'code', 'text', 'link', 'text'], 'Bold, italic, code and http links; other links stay text');
-  eq(inlineParts('[j](javascript:alert(1))').some((p) => p.t === 'link'), false, 'A javascript: link is never a link');
 }
 
 console.log('\n────────────────────────────────────────');

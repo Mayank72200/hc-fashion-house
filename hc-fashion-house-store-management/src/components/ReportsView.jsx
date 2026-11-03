@@ -190,7 +190,7 @@ export default function ReportsView() {
             <h1 className="page-title">Reports</h1>
             <p className="page-subtitle">Financial reports and receivables analysis</p>
           </div>
-          <HelpButton title="Reports — how to use" doc="reports">
+          <HelpButton title="Reports — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>Profit &amp; Loss</strong>: sales against expenses, without GST, by year or month.</li>
               <li><strong>Outstanding &amp; Aging</strong>: who owes you and how late, in 30-day groups.</li>

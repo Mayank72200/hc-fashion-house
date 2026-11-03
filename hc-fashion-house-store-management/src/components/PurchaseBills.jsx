@@ -181,7 +181,7 @@ export default function PurchaseBills() {
     }
   };
 
-  // v1.10.54 — reported (#42, @sangwanmail-eng): "Product not show properly
+  // v1.10.54 — reported (#42): "Product not show properly
   // in purchase tab". The Products & Services master held Keyboard,
   // motherboard, Mouse, Pen drive — but the purchase item dropdown offered
   // "mouse", "key", "Pen drive": lowercase variants and a half-typed entry
@@ -268,6 +268,7 @@ export default function PurchaseBills() {
       const { jsPDF } = await import('jspdf');
       const t = calcPurchaseTotal(purchase.items, !!purchase.applyRoundOff);
       const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+      doc.setProperties({ title: `Purchase bill ${purchase.invoiceNumber || ''}`.trim(), creator: 'HC Fashion House', author: 'HC Fashion House' });
       const marginL = 15, marginR = 195;
       let y = 20;
       const fmt = (n) => (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -372,7 +373,7 @@ export default function PurchaseBills() {
   const handleSave = async () => {
     if (!form.supplierName.trim()) { toast('Supplier name is required', 'warning'); return; }
     if (!form.invoiceNumber.trim()) { toast('Invoice number is required', 'warning'); return; }
-    // v1.10.58 — reported (#47 item 2, @sangwanmail-eng): "Purchase also
+    // v1.10.58 — reported (#47 item 2): "Purchase also
     // save without adding any product." Supplier and invoice number were
     // checked, but nothing verified the bill had any line items, so an
     // empty bill saved with a zero total.
@@ -517,6 +518,7 @@ export default function PurchaseBills() {
 
         // Apply deltas + write.
         const upserts = [];
+        const newProducts = [];
         for (const [, prod] of productsToUpsert) {
           if (prod._placeholderId) {
             const existing = byId.get(prod._placeholderId);
@@ -527,9 +529,20 @@ export default function PurchaseBills() {
             const newStock = roundQty((Number(existing.stock) || 0) + delta);
             upserts.push(saveProduct({ ...prod, stock: newStock, _placeholderId: undefined }));
           } else {
-            upserts.push(saveProduct(prod));
+            newProducts.push(prod);
           }
         }
+        // New products are created one at a time: the server names a new
+        // record from the clock, so two created in the same millisecond could
+        // share an id and the later file would replace the earlier one, stock
+        // and all. Every one is still tried if an earlier one fails.
+        upserts.push((async () => {
+          let failure = null;
+          for (const prod of newProducts) {
+            try { await saveProduct(prod); } catch (e) { failure = failure || e; }
+          }
+          if (failure) throw failure;
+        })());
         await Promise.all(upserts);
         toast(editingId ? 'Purchase updated' : 'Purchase added — items synced to Products', 'success');
       } catch (e) {
@@ -604,7 +617,7 @@ export default function PurchaseBills() {
     }
   };
 
-  // v1.10.50 — reported (#39, @sangwanmail-eng): "In add purchase option
+  // v1.10.50 — reported (#39): "In add purchase option
   // previous added supplier and item not shown. So all details need to be
   // fill again, like supplier name, gst number, address, item name etc".
   //
@@ -731,7 +744,7 @@ export default function PurchaseBills() {
   // Same idea for line items: recall HSN, rate and tax rates from the last
   // time this item was purchased. Rate is filled only when still 0 so a
   // price change the user has already typed is never clobbered.
-  // v1.10.55 — reported (#43, @sangwanmail-eng): "when we select item all
+  // v1.10.55 — reported (#43): "when we select item all
   // details fetch ok. But when we change item in same field details not
   // change."
   //
@@ -833,7 +846,7 @@ export default function PurchaseBills() {
             <h1 className="page-title">Purchase Bills</h1>
             <p className="page-subtitle">Track supplier invoices for ITC claims in GSTR-3B</p>
           </div>
-          <HelpButton title="Purchase Bills — how to use" doc="purchases">
+          <HelpButton title="Purchase Bills — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>Add Purchase</strong> — record every supplier tax invoice you receive. The GST paid becomes your ITC (input tax credit) in GSTR-3B.</li>
               <li><strong>Import from image (OCR)</strong> — snap the supplier's invoice with your phone. The app reads the supplier, GSTIN, invoice number, date, total and the item lines it can find, all on your computer. Check every field before saving.</li>
@@ -1094,7 +1107,7 @@ export default function PurchaseBills() {
                 <div className="form-group" style={{ flex: 0.7, margin: 0 }}>
                   {idx === 0 && <label className="form-label">Qty</label>}
                   {/* v1.6.8 (P2 #30): decimal quantity for 2.5 kg / 0.5 hr / etc. */}
-                  {/* v1.10.69 - requested (#71 item 2, @sangwanmail-eng): the
+                  {/* v1.10.69 - requested (#71 item 2): the
                       number fields here now select their contents on focus, as
                       the invoice screen has since v1.10.67. Without it, typing
                       into a field showing 0 gave you 018 rather than 18. */}
@@ -1244,7 +1257,7 @@ export default function PurchaseBills() {
                       <td style={{ textAlign: 'right' }}>{formatCurrency(t.taxable)}</td>
                       <td style={{ textAlign: 'right' }} className="text-muted">{formatCurrency(t.tax)}</td>
                       <td style={{ textAlign: 'right' }} className="font-bold">{formatCurrency(t.finalTotal)}</td>
-                      {/* v1.10.69 - requested (#71 item 3, @sangwanmail-eng):
+                      {/* v1.10.69 - requested (#71 item 3):
                           "the Status column should have a drop-down option,
                           similar to the Status drop-down available on the
                           Dashboard." Marking a supplier bill paid took

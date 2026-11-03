@@ -72,7 +72,7 @@ export const DEFAULT_PRINT_SETTINGS = {
   // -- Barcode / QR of invoice number --
   invoiceBarcodeEnabled: false,   // barcode of invoice # (Code128-style, printed via jsPDF text)
   invoiceQrEnabled: false,        // QR of invoice # (or verify URL if configured)
-  invoiceQrUrl: '',               // e.g. https://mycompany.com/verify/{invoice_number}
+  invoiceQrUrl: '',               // optional: your own verification page link with {invoice_number}
 
   // -- Digital signature --
   signatureImage: '',        // base64 data URL (uploaded in Print Settings)
@@ -218,8 +218,9 @@ export const DEFAULT_PRINT_SETTINGS = {
   // and prevent settings-migration false positives.
 
   // -- Saved custom PDF templates --
-  // Each saved template snapshot is a full settings object under a user-given
-  // name. Users tune → save as "Retail Template" → recall any time.
+  // Each saved template is a snapshot of the print design under a user-given
+  // name. Users tune → save as "Retail Template" → recall any time. The
+  // snapshot leaves out TEMPLATE_LOCAL_KEYS (below), which stay with this PC.
   savedTemplates: [],            // [{ name: 'Retail v1', settings: {...} }]
 
   // -- Setup / onboarding --
@@ -314,6 +315,21 @@ export function savePrintSettings(settings) {
     localStorage.setItem('gst_printSettings', JSON.stringify(settings));
     return true;
   } catch { return false; }
+}
+
+// Saved templates are print designs. These keys belong to this PC's own
+// set-up instead: the template list itself, the invoice-number prefixes, the
+// custom tax rates, the first-run flags and the preview zoom. A template never
+// stores them and loading one leaves them as they are, so loading an older
+// template can no longer wipe the templates saved after it or bring back old
+// prefixes. Templates saved before this rule may still carry these keys
+// (including copies of earlier templates); they are ignored.
+export const TEMPLATE_LOCAL_KEYS = ['savedTemplates', 'customPrefixes', 'customTaxRates', 'onboardingComplete', 'onboardingSkipped', 'previewZoom'];
+
+export function templateDesign(settings) {
+  const design = settings && typeof settings === 'object' ? { ...settings } : {};
+  for (const key of TEMPLATE_LOCAL_KEYS) delete design[key];
+  return design;
 }
 
 // ============================================================================

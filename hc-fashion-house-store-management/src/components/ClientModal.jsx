@@ -42,7 +42,7 @@ export default function ClientModal({ show, onClose, onSave, client, isEditing, 
   const cc = getCountryConfig(form.country);
   const stateOptions = getStatesForCountry(form.country);
 
-  // v1.10.68 (#68, idea from @deppen12) — a GSTIN already says which state the
+  // v1.10.68 (#68) — a GSTIN already says which state the
   // client is registered in and carries a checksum, so fill the state in and
   // catch a typo here, offline. The state drives place of supply, so a wrong
   // one silently swaps CGST + SGST for IGST on every invoice to this client.

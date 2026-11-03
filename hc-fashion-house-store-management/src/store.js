@@ -392,15 +392,16 @@ const EXPORTABLE_LOCALSTORAGE_KEYS = [
   'freegstbill_invoiceOptions',      // per-invoice display preference defaults
   'freegstbill_theme',               // light/dark (was written as 'theme' in the old whitelist — typo)
   'freegstbill_onboarded',           // skip welcome wizard on next launch
-  'freegstbill_dismissedUpdate',     // version the user dismissed the update banner for
   'freegstbill_pwa_dismissed_at',    // 14-day PWA-install-banner cooldown timestamp
 ];
 
-// Keys matched by prefix. Currently used for per-profile last-used payment
-// account (gst_lastUsedAccountId_<profileId>) so multi-account preferences
-// survive backup/restore.
+// Keys matched by prefix: the per-profile last-used payment account
+// (gst_lastUsedAccountId_<profileId>) so multi-account preferences survive
+// backup/restore, and the GSTR-1 / 3B "Filed" marks of each GSTIN
+// (gst_filing_status_<GSTIN>), so filing history moves with the data.
 const EXPORTABLE_LOCALSTORAGE_PREFIXES = [
   'gst_lastUsedAccountId_',
+  'gst_filing_status_',
 ];
 
 const collectLocalStorage = () => {
@@ -424,13 +425,38 @@ const collectLocalStorage = () => {
 const isRestorable = (k) => EXPORTABLE_LOCALSTORAGE_KEYS.includes(k)
   || EXPORTABLE_LOCALSTORAGE_PREFIXES.some(p => k.startsWith(p));
 
+// Returns how many settings were put back.
 const restoreLocalStorage = (map) => {
-  if (!map || typeof map !== 'object') return;
+  if (!map || typeof map !== 'object') return 0;
+  let restored = 0;
   Object.entries(map).forEach(([k, v]) => {
     if (!isRestorable(k)) return; // ignore foreign keys — never let a backup smuggle unrelated writes in
-    try { localStorage.setItem(k, v); } catch { /* ignore */ }
+    try { localStorage.setItem(k, v); restored += 1; } catch { /* ignore */ }
   });
+  return restored;
 };
+
+// Backups never carry the Google Drive Client ID, in either direction: a
+// backup restored on another PC must not switch Drive uploads on by itself.
+// The server leaves it out too; this is the second guard. Each bill keeps the
+// profile it was made with: only that one field is left out of the copy in
+// the backup (the stored bill is not changed).
+const withoutDriveClientId = (p) => {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
+  const { googleClientId: _driveClientId, ...rest } = p;
+  return rest;
+};
+const profilesWithoutDriveClientId = (list) => (Array.isArray(list) ? list.map(withoutDriveClientId) : list);
+const billWithoutDriveClientId = (bill) => (
+  bill?.data?.profile && typeof bill.data.profile === 'object' && 'googleClientId' in bill.data.profile
+    ? { ...bill, data: { ...bill.data, profile: withoutDriveClientId(bill.data.profile) } }
+    : bill
+);
+const billsWithoutDriveClientId = (list) => (Array.isArray(list) ? list.map(billWithoutDriveClientId) : list);
+
+// Written into every export. Files without it come from older versions and
+// are still accepted.
+const BACKUP_FORMAT_VERSION = 1;
 
 // Cached app version — pulled from server once per session via /api/version so the
 // frontend doesn't have to ship its own copy of package.json. Falls back to 'unknown'
@@ -451,35 +477,16 @@ const getAppVersion = async () => {
 //
 // `selection` shape: { profile, profiles, bills, clients, products, expenses,
 //   purchases, recurring, receipts, termsTemplates, meta, localStorage } — each bool.
-// v1.10.69 - starting an update. The "Update Now" buttons used to be links to
-// freegstbill-update://run, a URL protocol that the OLD Install FreeGSTBill.bat
-// registered in the registry. The HTA launcher replaced that installer in
-// v1.10.44 and registers no protocol, so on every install made since then the
-// button did nothing at all - no error, no window, nothing. The Control Panel
-// already ran the update properly through the server; these now do the same.
-export const runUpdateNow = async () => {
-  try {
-    const res = await fetch('/api/control-panel/launch-script', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update' }),
-    });
-    const data = await res.json();
-    if (!data.ok) return { ok: false, error: data.error || data.stderr || 'The update script did not finish.' };
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-};
-
+// The profile(s) and the bills' profile copies are written without the Google
+// Drive Client ID.
 export const exportAllData = async (selection) => {
   const [all, version] = await Promise.all([apiFetch(`${API}/export`), getAppVersion()]);
   const sel = selection || { profile: true, profiles: true, bills: true, clients: true, products: true, expenses: true, purchases: true, recurring: true, receipts: true, termsTemplates: true, meta: true, localStorage: true };
 
-  const data = { exportedAt: new Date().toISOString(), version, __freegstbill_backup: true };
-  if (sel.profile)        data.profile = all.profile;
-  if (sel.profiles)       data.profiles = all.profiles;
-  if (sel.bills)          data.bills = all.bills;
+  const data = { exportedAt: new Date().toISOString(), version, formatVersion: BACKUP_FORMAT_VERSION, __freegstbill_backup: true };
+  if (sel.profile)        data.profile = withoutDriveClientId(all.profile);
+  if (sel.profiles)       data.profiles = profilesWithoutDriveClientId(all.profiles);
+  if (sel.bills)          data.bills = billsWithoutDriveClientId(all.bills);
   if (sel.clients)        data.clients = all.clients;
   if (sel.termsTemplates) data.termsTemplates = all.termsTemplates;
   if (sel.products)       data.products = all.products;
@@ -494,7 +501,8 @@ export const exportAllData = async (selection) => {
 };
 
 // Inspect a backup file without committing — returns counts so the UI can show
-// what's in it before the user picks what to restore.
+// what's in it before the user picks what to restore. A file without
+// `formatVersion` (0 here) was made by an older version; it is accepted as is.
 export const inspectBackup = (jsonString) => {
   let data;
   try { data = JSON.parse(jsonString); }
@@ -503,6 +511,7 @@ export const inspectBackup = (jsonString) => {
     valid: !!data && (data.__freegstbill_backup || data.bills || data.profile),
     exportedAt: data.exportedAt || null,
     version: data.version || null,
+    formatVersion: Number(data.formatVersion) || 0,
     counts: {
       profile: data.profile && Object.keys(data.profile).length > 0 ? 1 : 0,
       profiles: Array.isArray(data.profiles) ? data.profiles.length : 0,
@@ -521,17 +530,43 @@ export const inspectBackup = (jsonString) => {
   };
 };
 
-// Selective import. `selection` is the same shape as for exportAllData.
-export const importData = async (jsonString, selection) => {
+const BACKUP_PARTS = ['profile', 'profiles', 'bills', 'clients', 'products', 'expenses', 'purchases', 'recurring', 'receipts', 'termsTemplates', 'meta', 'localStorage'];
+
+// The import options, whichever way they are passed:
+//   importData(data, { overwrite })              everything in the file
+//   importData(data, selection, { overwrite })   only the ticked parts
+//   importData(data, { overwrite, selection }) or importData(data, { ...selection, overwrite })
+// Existing records are replaced only when overwrite is exactly true.
+const importOptions = (second, third) => {
+  let selection = second;
+  let overwrite = third?.overwrite === true;
+  if (second && typeof second === 'object' && ('overwrite' in second || 'selection' in second)) {
+    const { overwrite: ticked, selection: inner, ...parts } = second;
+    overwrite = overwrite || ticked === true;
+    selection = inner || (BACKUP_PARTS.some((k) => k in parts) ? parts : undefined);
+  }
+  return { sel: selection || Object.fromEntries(BACKUP_PARTS.map((k) => [k, true])), overwrite };
+};
+
+// Selective import. `selection` is the same shape as for exportAllData
+// (left out = everything in the file). By default records that already exist
+// are kept and only missing ones are added. With { overwrite: true } (the
+// "Replace existing data" choice, unticked by default) `?overwrite=1` is sent
+// and the server replaces matching records, after taking a snapshot first.
+// Resolves to the server's own counts of what was written and skipped, plus
+// `localStorageRestored`: how many browser settings were put back.
+export const importData = async (jsonString, selection, options) => {
   const inspected = typeof jsonString === 'string' ? inspectBackup(jsonString) : { raw: jsonString };
   const data = inspected.raw;
-  const sel = selection || { profile: true, profiles: true, bills: true, clients: true, products: true, expenses: true, purchases: true, recurring: true, receipts: true, termsTemplates: true, meta: true, localStorage: true };
+  const { sel, overwrite } = importOptions(selection, options);
 
   // Build a filtered payload — never touch collections the user didn't tick.
+  // The Drive Client ID never comes back in through a backup (backups made
+  // by older versions carry it).
   const payload = {};
-  if (sel.profile && data.profile)               payload.profile = data.profile;
-  if (sel.profiles && data.profiles)             payload.profiles = data.profiles;
-  if (sel.bills && data.bills)                   payload.bills = data.bills;
+  if (sel.profile && data.profile)               payload.profile = withoutDriveClientId(data.profile);
+  if (sel.profiles && data.profiles)             payload.profiles = profilesWithoutDriveClientId(data.profiles);
+  if (sel.bills && data.bills)                   payload.bills = billsWithoutDriveClientId(data.bills);
   if (sel.clients && data.clients)               payload.clients = data.clients;
   if (sel.termsTemplates && data.termsTemplates) payload.termsTemplates = data.termsTemplates;
   if (sel.products && data.products)             payload.products = data.products;
@@ -541,9 +576,10 @@ export const importData = async (jsonString, selection) => {
   if (sel.purchases && data.purchases)           payload.purchases = data.purchases;
   if (sel.meta && data.meta)                     payload.meta = data.meta;
 
-  const result = await apiFetch(`${API}/import`, { method: 'POST', body: JSON.stringify(payload) });
+  const qs = overwrite ? '?overwrite=1' : '';
+  const result = await apiFetch(`${API}/import${qs}`, { method: 'POST', body: JSON.stringify(payload) });
 
-  if (sel.localStorage && data.localStorage) restoreLocalStorage(data.localStorage);
+  const localStorageRestored = sel.localStorage && data.localStorage ? restoreLocalStorage(data.localStorage) : 0;
 
-  return result;
+  return { ...result, localStorageRestored };
 };

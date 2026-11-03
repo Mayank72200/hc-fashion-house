@@ -4,7 +4,7 @@ import { toast } from './Toast';
 import { confirmAction } from './ConfirmModal';
 import InvoicePreview from './InvoicePreview';
 import { getProfile, getInvoiceDisplayOptions, saveInvoiceDisplayOptions } from '../store';
-import { DEFAULT_PRINT_SETTINGS, getPrintSettings, savePrintSettings, buildSampleInvoice, BUSINESS_PRESETS, applyBusinessPreset, LABEL_PRESETS } from '../utils/printSettings';
+import { DEFAULT_PRINT_SETTINGS, getPrintSettings, savePrintSettings, buildSampleInvoice, BUSINESS_PRESETS, applyBusinessPreset, LABEL_PRESETS, templateDesign } from '../utils/printSettings';
 import HelpButton from './HelpButton';
 
 // v1.9.9 — Visual design presets. Each is a starting point that flips
@@ -190,9 +190,12 @@ const DESIGN_PRESETS = [
 // Per user feedback (v1.8.3): existing thermal output had inconsistent
 // darkness (some gray, some black), Large font size didn't scale properly,
 // and users need dedicated controls to match their specific printer.
-// Reference receipts from SMART BAZAAR / Reliance show the ideal style:
+// Reference supermarket receipts show the ideal style:
 //   ALL CAPS · BOLD everywhere · consistent dark ink · monospace font
 // ============================================================================
+
+// Shown when saving or loading a print template cannot be stored.
+const TEMPLATE_STORAGE_FULL = 'browser storage is full. Delete an old template or a large letterhead or signature image, then try again.';
 
 export default function PrintSettings() {
   const [settings, setSettings] = useState(getPrintSettings);
@@ -210,6 +213,15 @@ export default function PrintSettings() {
     const next = { ...settings, ...patch };
     setSettings(next);
     savePrintSettings(next);
+  };
+
+  // Saved templates: write first and update the screen only when the browser
+  // stored it, so a full storage never shows a template (or a loaded design)
+  // that would be gone after a reload. Returns false when the write failed.
+  const commit = (next) => {
+    if (!savePrintSettings(next)) return false;
+    setSettings(next);
+    return true;
   };
 
   // v1.10.36 — Business-type awareness for "Recommended for" tags AND
@@ -293,6 +305,7 @@ export default function PrintSettings() {
         const width = 80;
         const height = (canvas.height * width) / canvas.width;
         const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [width, Math.max(150, height)] });
+        pdf.setProperties({ title: 'Test Print', author: 'HC Fashion House', creator: 'HC Fashion House' });
         const jpegQ = bufSafe ? 0.72 : 0.95;
         pdf.addImage(canvas.toDataURL('image/jpeg', jpegQ), 'JPEG', 0, 0, width, height, undefined, 'FAST');
 
@@ -367,7 +380,7 @@ export default function PrintSettings() {
             <Printer size={18} style={{ display: 'inline', verticalAlign: -3, marginRight: 6 }} />
             Print & PDF Settings
             <span style={{ marginLeft: 6, verticalAlign: -2, display: 'inline-block' }}>
-              <HelpButton title="Print & PDF settings — how to use" doc="print-settings" size={16}>
+              <HelpButton title="Print & PDF settings — how to use" size={16}>
                 <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
                   <li><strong>Business type</strong> sets up to a dozen settings for your kind of business in one click.</li>
                   <li><strong>Visual style</strong> picks a design; everything below fine-tunes it.</li>
@@ -643,7 +656,7 @@ export default function PrintSettings() {
             ]}
             hint="Thermal print heads render bold weights much darker than normal — pick bold or ultra for consistent legibility." />
           <ToggleRow label="ALL CAPS mode" value={settings.allCaps} onChange={v => set({ allCaps: v })}
-            hint="Renders every text element in UPPERCASE — matches the SMART BAZAAR / Reliance receipt style. Best for high legibility." />
+            hint="Renders every text element in UPPERCASE — matches a supermarket-receipt style. Best for high legibility." />
         </SettingGroup>
 
         {/* LAYOUT */}
@@ -816,7 +829,7 @@ export default function PrintSettings() {
               hint="Prints a QR of the invoice number (or verification URL if set below) in the bottom-right corner." />
             {settings.invoiceQrEnabled && (
               <TextRow label="Verification URL (optional)" value={settings.invoiceQrUrl} onChange={v => set({ invoiceQrUrl: v })}
-                placeholder="https://mycompany.com/verify/{invoice_number}"
+                placeholder="Your verification page link with {invoice_number}"
                 hint="{invoice_number} gets replaced with the actual invoice #. Leave blank to encode just the number." />
             )}
             <ToggleRow label="Invoice number as barcode text" value={settings.invoiceBarcodeEnabled} onChange={v => set({ invoiceBarcodeEnabled: v })}
@@ -835,7 +848,7 @@ export default function PrintSettings() {
             {settings.feedbackQrEnabled && (
               <>
                 <TextRow label="URL to encode" value={settings.feedbackQrUrl} onChange={v => set({ feedbackQrUrl: v })}
-                  placeholder="e.g. https://g.page/r/YOUR_ID/review" />
+                  placeholder="e.g. your Google review link" />
                 <TextRow label="Label above QR" value={settings.feedbackQrLabel} onChange={v => set({ feedbackQrLabel: v })}
                   placeholder="Rate us · Give feedback" />
               </>
@@ -914,7 +927,7 @@ export default function PrintSettings() {
                 ['direct', 'Direct HTML — sharper, faster (recommended)'],
                 ['pdf',    'Via PDF — safer fallback for finicky printers'],
               ]}
-              hint="Direct sends invoice text as vector to the printer — 203-dpi thermal renders it sharply. If your printer or browser mis-handles the direct path, switch to Via PDF for the pre-v1.10.42 raster behaviour." />
+              hint="Direct sends invoice text as vector to the printer — 203-dpi thermal renders it sharply. If your printer or browser mis-handles the direct path, switch to Via PDF (the older image-based method)." />
           </SettingGroup>
 
           {/* PER-TYPE INVOICE PREFIX OVERRIDES (v1.10.10) */}
@@ -1071,7 +1084,7 @@ export default function PrintSettings() {
               80% = compact (fits more per page) · 100% = default · 140% = large. Scales the entire PDF proportionally.
             </p>
             <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', margin: '3px 0 0', fontStyle: 'italic' }}>
-              v1.10.10 note: applied at PDF export time. The on-screen preview always renders at 100% — download a PDF to see the actual scale.
+              Note: applied at PDF export time. The on-screen preview always renders at 100% — download a PDF to see the actual scale.
             </p>
           </SettingGroup>
 
@@ -1256,18 +1269,19 @@ export default function PrintSettings() {
         </p>
         <SavedTemplatesEditor
           templates={settings.savedTemplates || []}
-          onChange={v => set({ savedTemplates: v })}
+          onChange={v => commit({ ...settings, savedTemplates: v })}
           currentSettings={settings}
           onLoad={async (tpl) => {
             if (!await confirmAction({
               title: `Load template "${tpl.name}"?`,
-              message: 'This overwrites your current print settings. Save the current setup as a template first if you want to be able to go back.',
+              message: 'This overwrites your current print design. Your saved templates, invoice prefixes and custom tax rates stay as they are. Save the current setup as a template first if you want to be able to go back.',
               confirmLabel: 'Load template',
               tone: 'warning',
             })) return;
-            setSettings(tpl.settings);
-            savePrintSettings(tpl.settings);
-            toast(`Loaded "${tpl.name}"`, 'success');
+            // Only the design comes from the template; the template list,
+            // prefixes, tax rates and first-run flags stay as they are now.
+            if (commit({ ...settings, ...templateDesign(tpl.settings) })) toast(`Loaded "${tpl.name}"`, 'success');
+            else toast(`Could not load "${tpl.name}": ${TEMPLATE_STORAGE_FULL}`, 'error');
           }} />
       </div>
 
@@ -1545,6 +1559,10 @@ function ExtraFieldsEditor({ fields, onChange }) {
 
 function SavedTemplatesEditor({ templates, onChange, currentSettings, onLoad }) {
   const [name, setName] = useState('');
+  // Every entry is written as a design snapshot (templateDesign). This also
+  // drops the copies of earlier templates that older versions nested inside
+  // each one, so the list no longer doubles in size with every save.
+  const write = (list) => onChange(list.map((tpl) => ({ ...tpl, settings: templateDesign(tpl.settings) })));
   return (
     <div>
       {(templates || []).map((tpl, i) => (
@@ -1553,7 +1571,9 @@ function SavedTemplatesEditor({ templates, onChange, currentSettings, onLoad }) 
           <button type="button" className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
             onClick={() => onLoad(tpl)}>Load</button>
           <button type="button" className="icon-btn icon-btn-red"
-            onClick={() => onChange(templates.filter((_, j) => j !== i))}><Trash2 size={13} /></button>
+            onClick={() => {
+              if (write(templates.filter((_, j) => j !== i)) === false) toast(`Could not delete "${tpl.name}": the browser did not save the change.`, 'error');
+            }}><Trash2 size={13} /></button>
         </div>
       ))}
       <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
@@ -1563,7 +1583,10 @@ function SavedTemplatesEditor({ templates, onChange, currentSettings, onLoad }) 
         <button type="button" className="btn btn-primary" style={{ fontSize: '0.78rem' }}
           onClick={() => {
             if (!name.trim()) return;
-            onChange([...(templates || []), { name: name.trim(), settings: { ...currentSettings } }]);
+            if (write([...(templates || []), { name: name.trim(), settings: currentSettings }]) === false) {
+              toast(`Could not save template "${name.trim()}": ${TEMPLATE_STORAGE_FULL}`, 'error');
+              return;
+            }
             setName('');
             toast(`Saved template "${name.trim()}"`, 'success');
           }}>

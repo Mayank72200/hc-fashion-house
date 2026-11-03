@@ -20,8 +20,8 @@ function eq(actual, expected, label) {
 }
 
 console.log('\n[#63] Formula-like text is written as plain text');
-eq(toCsvCell('=HYPERLINK("http://evil.example","Invoice")'),
-  `"'=HYPERLINK(""http://evil.example"",""Invoice"")"`,
+eq(toCsvCell('=HYPERLINK("http://localhost/evil","Invoice")'),
+  `"'=HYPERLINK(""http://localhost/evil"",""Invoice"")"`,
   'leading = gets an apostrophe, and its quotes are still escaped');
 eq(toCsvCell("=cmd|' /C calc'!A0"), "'=cmd|' /C calc'!A0", 'DDE command payload');
 eq(toCsvCell('+91 98765 43210'), "'+91 98765 43210", 'leading + (a phone number) stays text');

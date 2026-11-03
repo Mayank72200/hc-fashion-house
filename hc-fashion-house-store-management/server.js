@@ -1,8 +1,13 @@
+import './egress-guard.mjs';
+// ^ First, before anything else loads: it refuses every connection that
+// leaves this PC and every program start except the app's own control
+// scripts and Explorer, and logs each attempt in logs/egress-guard.log.
 import express from 'express';
 // v1.10.0 — `cors` package no longer imported. The CORS-lockdown
 // middleware below is intentionally custom + strict (localhost only)
 // where `cors()` echoed `*` for every origin.
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -15,7 +20,31 @@ import { fileURLToPath } from 'url';
 import { templateTotals, clientYearToDate, nextCounterValue, startFor, numberSeriesFor, counterKeyFor, formatDocNumber, businessKeyOf, getFinancialYearLabel, INVOICE_TYPES } from './src/utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, 'data');
+
+// Where this copy keeps the books. HCFH_HOME moves all of it (data, Saved
+// Invoices, Trash, logs) to another folder, for example a fresh temporary
+// folder for a test run, so tests never touch real books. Unset: beside this
+// file, as always. The control scripts resolve the same folders
+// (hcfh-paths.ps1), and the server hands them HCFH_HOME when it is set.
+const HCFH_HOME = String(process.env.HCFH_HOME || '').trim();
+const APP_HOME = HCFH_HOME ? path.resolve(HCFH_HOME) : __dirname;
+if (HCFH_HOME && !(() => { try { return fs.statSync(APP_HOME).isDirectory(); } catch { return false; } })()) {
+  // Never created here: an empty new folder would look as if the books were lost.
+  console.error(`\n  HCFH_HOME points to a folder that does not exist: ${APP_HOME}`);
+  console.error('  Create that folder or remove the HCFH_HOME setting, then start the app again.\n');
+  process.exit(1);
+}
+const DATA_DIR = path.join(APP_HOME, 'data');
+// The server's own logs (blocked connections, CSP reports) sit beside data/,
+// so backups, snapshots and Move ZIPs never carry them.
+const LOG_DIR = path.join(APP_HOME, 'logs');
+// Launcher backup ZIPs (Create Backup, Export for Move, the copy made before a
+// ZIP restore) all go to one folder, which "Open Backups Folder" opens too:
+// HCFH_BACKUP_DIR, else <HCFH_HOME>\Backups, else <install>\Backups beside
+// _system. Outside the data folder, and never in Documents.
+const BACKUPS_HOME = String(process.env.HCFH_BACKUP_DIR || '').trim()
+  ? path.resolve(String(process.env.HCFH_BACKUP_DIR).trim())
+  : path.join(HCFH_HOME ? APP_HOME : path.dirname(__dirname), 'Backups');
 
 // Port choice — we deliberately default to a high, unusual number rather than
 // the conventional 3001. The 3000-range is heavily used by every other Node /
@@ -27,10 +56,15 @@ const DATA_DIR = path.join(__dirname, 'data');
 // wins over this default — so a single user who genuinely needs 47371 for
 // something else can edit that file and we'll respect it forever.
 const DEFAULT_PORT = 47371;
-const PORT_FILE = path.join(__dirname, 'data', 'port.txt');
+// port.txt is the PREFERRED port. The browser keeps this shop's settings per
+// address (http://localhost:<port>), so the file is written once, when it is
+// missing, and a second copy or a test run can never move it. port.run holds
+// the port this server really got, for the launcher, Stop and the Vite dev
+// proxy; it is removed again when the server exits.
+const PORT_FILE = path.join(DATA_DIR, 'port.txt');
+const PORT_RUN_FILE = path.join(DATA_DIR, 'port.run');
 
-// Read the persisted port (if any) — written once on first successful start
-// and every time we get bumped off our preferred port by EADDRINUSE.
+// Read the persisted port (if any).
 const persistedPort = (() => {
   try {
     if (!fs.existsSync(PORT_FILE)) return null;
@@ -40,36 +74,79 @@ const persistedPort = (() => {
 })();
 const STARTING_PORT = persistedPort || DEFAULT_PORT;
 const MAX_PORT_SCAN = 50; // 47371 → 47420 is enough headroom for any conceivable collision
+// Set once the server listens (startServer, near the end of this file).
+let activeServer = null;
+let listeningPort = 0;
+let preferredPort = STARTING_PORT;
 
 const app = express();
+app.disable('x-powered-by');
+
+// ========================
+// WHO MAY CALL THIS SERVER
+// ========================
+// The names this server answers to, on the port it is bound to. Loopback
+// only (it listens on 127.0.0.1); a LAN mode would add names here and nowhere
+// else, because the Host and Origin checks below both use this one list.
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const portOf = (req) => req.socket?.localPort || listeningPort;
+const allowedHosts = (port) => LOOPBACK_HOSTS.map((h) => `${h}:${port}`);
+const allowedOrigins = (port) => allowedHosts(port).map((h) => `http://${h}`);
+
+// First of all, the Host check (DNS rebinding, verdict #2). A web page that
+// points its own name at 127.0.0.1 still sends that name as Host, so only our
+// own names on our own port are served. The Origin check alone did not stop
+// it: same-origin GETs carry no Origin, so such a page could read every bill.
+app.use((req, res, next) => {
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!allowedHosts(portOf(req)).includes(host)) {
+    return res.status(421).json({ error: 'Misdirected request', code: 'misdirected' });
+  }
+  return next();
+});
+
+// The page's security policy. The same policy is in the meta tag of
+// src/index.html (keep the two identical); the header adds what only a header
+// can carry: no page may frame the app, and violations are reported to
+// /api/csp-report. Sent with HTML only; the API sends JSON.
+const CSP_REPORT_ROUTE = '/api/csp-report';
+const CSP_POLICY = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' http://localhost:* http://127.0.0.1:*; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com; frame-src 'self' blob: https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; manifest-src 'self'";
+const CSP_HEADER = `${CSP_POLICY}; frame-ancestors 'none'; report-uri ${CSP_REPORT_ROUTE}`;
 
 // v1.10.0 — CORS lockdown. Previously `app.use(cors())` echoed
 // Access-Control-Allow-Origin: *, which meant any site the user visited
 // could `fetch('http://localhost:47371/api/bills')` and read/wipe all
-// data. This is a local desktop-style app: legitimate callers either
-// have no Origin header (same-page fetch from our own served HTML,
-// browsers' XHR to localhost from about:blank tools, curl) or an
-// Origin pointing at http://localhost:<port>. Everything else is
-// rejected. The Vite dev server proxies /api → us so its origin is
-// also localhost.
+// data. Now the app is same-origin only: no CORS headers at all; an Origin
+// header must be one of our own addresses on our own port (a page served
+// from any other local port is refused too); and every change (POST, PUT,
+// DELETE, PATCH) must carry one, as browsers always do for those. GETs from
+// our own page, the launcher's check and curl carry none and pass. The Vite
+// dev proxy sends our own origin (vite.config.js).
+const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+const refuse = (res) => res.status(403).json({ error: 'Cross-origin request refused' });
 app.use((req, res, next) => {
+  const isApi = req.path === '/api' || req.path.startsWith('/api/');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  // same-origin-allow-popups, not same-origin: the Google sign-in popup used
+  // by "Save to Drive" answers this page through window.opener.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=()');
+  // API answers (exports, settings, PIN state) are never kept by the browser.
+  if (isApi) res.setHeader('Cache-Control', 'no-store');
+  // Browsers mark requests started by another site (another local port
+  // included); the API serves only our own pages and typed addresses.
+  const site = req.headers['sec-fetch-site'];
+  if (isApi && site && site !== 'same-origin' && site !== 'none') return refuse(res);
   const origin = req.headers.origin;
-  const allow =
-    !origin ||
-    /^https?:\/\/localhost(:\d+)?$/i.test(origin) ||
-    /^https?:\/\/127\.0\.0\.1(:\d+)?$/i.test(origin) ||
-    /^https?:\/\/\[::1\](:\d+)?$/i.test(origin);
-  if (!allow) {
-    return res.status(403).json({ error: 'Cross-origin request refused' });
-  }
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  }
+  const own = !origin || allowedOrigins(portOf(req)).includes(String(origin).toLowerCase());
+  // Reports the browser sends by itself carry Origin "null" (no-referrer).
+  if (req.path === CSP_REPORT_ROUTE) return (own || origin === 'null') ? next() : refuse(res);
+  if (!own || (!origin && WRITE_METHODS.has(req.method))) return refuse(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
-  next();
+  return next();
 });
 
 // v1.10.0 — Body size lowered from 50mb → 5mb. Legit invoice payloads
@@ -85,8 +162,40 @@ const IMPORT_ROUTE = '/api/import';
 const jsonBody = express.json({ limit: '5mb' });
 const importBody = express.json({ limit: '500mb' });
 app.use((req, res, next) => {
-  if (req.path === LOCAL_PREFS_ROUTE) return next();
+  if (req.path === LOCAL_PREFS_ROUTE || req.path === CSP_REPORT_ROUTE) return next();
   return (req.path === IMPORT_ROUTE ? importBody : jsonBody)(req, res, next);
+});
+
+// ========================
+// CSP VIOLATION REPORTS
+// ========================
+// Sent by the browser (the header's report-uri) and by the page itself
+// (main.jsx). Anything the policy blocks must be visible, not silent: one
+// JSON line each in logs/csp.log. None are expected in normal use. At most 30
+// a minute are written, the file is capped, and the answer is always 204.
+const CSP_LOG = path.join(LOG_DIR, 'csp.log');
+const CSP_LOG_MAX = 256 * 1024;
+const cspLogWindow = { start: 0, count: 0 };
+const cspBody = express.text({ type: ['application/csp-report', 'application/reports+json', 'application/json', 'text/plain'], limit: '64kb' });
+app.post(CSP_REPORT_ROUTE, cspBody, (req, res) => {
+  const now = Date.now();
+  if (now - cspLogWindow.start > 60 * 1000) { cspLogWindow.start = now; cspLogWindow.count = 0; }
+  const raw = typeof req.body === 'string' ? req.body.trim() : '';
+  // A data home that has gone away is never made again just for a log line.
+  if (raw && ++cspLogWindow.count <= 30 && fs.existsSync(APP_HOME)) {
+    try {
+      let report;
+      try { report = JSON.parse(raw); } catch { report = raw; }
+      let text = JSON.stringify(report);
+      if (text.length > 8192) text = JSON.stringify(text.slice(0, 8192));
+      const line = `{"ts":${JSON.stringify(new Date(now).toISOString())},"report":${text}}\n`;
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+      // When full, the log becomes csp.log.old (one older file is kept).
+      try { if (fs.statSync(CSP_LOG).size + line.length > CSP_LOG_MAX) fs.renameSync(CSP_LOG, `${CSP_LOG}.old`); } catch { /* no log yet */ }
+      fs.appendFileSync(CSP_LOG, line, 'utf-8');
+    } catch { /* reporting is best effort */ }
+  }
+  res.status(204).end();
 });
 
 // Ensure data directory and sub-directories exist
@@ -99,6 +208,17 @@ for (const dir of DIRS) {
 // Helper: safe filename from ID (replace slashes, etc.)
 function safeFileName(id) {
   return String(id).replace(/[/\\:*?"<>|]/g, '_');
+}
+
+// Id for a record sent without one. The millisecond alone was not unique: a
+// purchase bill saves all its new products at once, and two made in the same
+// millisecond overwrote each other (cr#15). Now a random part too, and a
+// fresh pick if that file exists anyway.
+function newId(prefix, dir) {
+  let id;
+  do { id = `${prefix}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`; }
+  while (fs.existsSync(path.join(DATA_DIR, dir, safeFileName(id) + '.json')));
+  return id;
 }
 
 // v1.10.0 — Path-traversal-safe user-string → single path segment.
@@ -130,11 +250,38 @@ function isPathInside(resolved, root) {
   return p === r || p.startsWith(r + path.sep);
 }
 
+// Cloud-synced folders: whatever is put in them is uploaded. Only the sync
+// programs' own folders count (a folder that merely has "OneDrive" in its
+// name is fine): the OneDrive folders Windows names in its environment,
+// Dropbox's folders (from its info.json, else the default one), and Google
+// Drive's ("My Drive" / "Shared drives" at the root of its drive letter).
+function syncedRootOf(p) {
+  if (!p || !path.isAbsolute(String(p))) return null;
+  if (/^[a-z]:[\\/](my drive|shared drives|other computers)([\\/]|$)/i.test(String(p))) return 'Google Drive';
+  const home = process.env.USERPROFILE || os.homedir();
+  const roots = [];
+  for (const v of ['OneDrive', 'OneDriveCommercial', 'OneDriveConsumer']) {
+    if (process.env[v]) roots.push(['OneDrive', process.env[v]]);
+  }
+  if (home) roots.push(['Dropbox', path.join(home, 'Dropbox')], ['Google Drive', path.join(home, 'Google Drive')]);
+  for (const base of [process.env.LOCALAPPDATA, process.env.APPDATA]) {
+    if (!base) continue;
+    try {
+      const info = JSON.parse(fs.readFileSync(path.join(base, 'Dropbox', 'info.json'), 'utf-8'));
+      for (const account of Object.values(info || {})) {
+        if (account && typeof account.path === 'string' && account.path) roots.push(['Dropbox', account.path]);
+      }
+    } catch { /* Dropbox not installed */ }
+  }
+  const hit = roots.find(([, dir]) => path.isAbsolute(dir) && isPathInside(p, dir));
+  return hit ? hit[0] : null;
+}
+
 // v1.10.0 — Generic error response helper. Never returns raw Node
 // error messages to the client (they leak absolute filesystem paths,
 // EACCES/EPERM strings that hint at server structure). Server-side
 // logs the full detail; client sees a stable code + generic phrase.
-function errRes(res, status, code, err) {
+function errRes(res, status, code, err, extra) {
   if (err) {
     try {
       const ts = new Date().toISOString();
@@ -151,7 +298,7 @@ function errRes(res, status, code, err) {
     'invalid-path': 'Invalid path',
     'payload-too-large': 'Request body too large',
   };
-  return res.status(status).json({ error: MESSAGES[code] || code, code });
+  return res.status(status).json({ error: MESSAGES[code] || code, code, ...(extra || {}) });
 }
 
 // v1.10.0 — Atomic file write. Writes to `<file>.tmp` then renames
@@ -309,7 +456,12 @@ app.delete('/api/bills/:id', (req, res) => {
   try {
     const trashDir = path.join(DATA_DIR, 'trash');
     if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
-    fs.renameSync(filePath, path.join(trashDir, fname));
+    const trashed = path.join(trashDir, fname);
+    fs.renameSync(filePath, trashed);
+    // The 30 days (and the "deleted" date in Trash) count from now. A rename
+    // keeps the date of the last save, so a bill last saved weeks earlier was
+    // purged at the next start (cr#3).
+    try { const now = new Date(); fs.utimesSync(trashed, now, now); } catch { /* keeps the old date */ }
     // The list must not serve the moved bill from cache for 5 more seconds.
     invalidateCache('bills');
     res.json({ success: true, trashed: true });
@@ -325,8 +477,25 @@ const PROFILE_PATH = path.join(DATA_DIR, 'profile.json');
 const DEFAULT_PROFILE = {
   businessName: '', address: '', state: '', gstin: '', pan: '',
   email: '', phone: '', bankName: '', accountNumber: '', ifsc: '',
-  logo: '', signature: '', upiId: '', googleClientId: '', googleDriveFolder: 'GST Billing Invoices',
+  logo: '', signature: '', upiId: '', googleClientId: '', googleDriveFolder: 'HC Fashion House Invoices',
 };
+
+// This PC's Google Client ID (for "Save to Drive") is its own setting: a
+// backup file never carries it, and an imported one never brings one back, so
+// restoring a backup cannot switch Drive uploads on by itself.
+const stripLocalProfileFields = (p) => {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
+  const { googleClientId: _clientId, ...rest } = p;
+  return rest;
+};
+// Every bill keeps a copy of the profile it was made with; that one field is
+// left out of the copy that goes into, or comes from, a backup file (bills
+// already saved here are never rewritten for it).
+const billWithoutLocalFields = (bill) => (
+  bill?.data?.profile && typeof bill.data.profile === 'object' && 'googleClientId' in bill.data.profile
+    ? { ...bill, data: { ...bill.data, profile: stripLocalProfileFields(bill.data.profile) } }
+    : bill
+);
 
 app.get('/api/profile', (req, res) => {
   res.json(readJSON(PROFILE_PATH, DEFAULT_PROFILE));
@@ -348,7 +517,7 @@ app.get('/api/clients', (req, res) => {
 
 app.post('/api/clients', (req, res) => {
   const client = req.body;
-  if (!client.id) client.id = 'cli_' + Date.now();
+  if (!client.id) client.id = newId('cli', 'clients');
   const filePath = path.join(DATA_DIR, 'clients', safeFileName(client.id) + '.json');
   writeJSON(filePath, client);
   res.json({ success: true, id: client.id });
@@ -363,17 +532,27 @@ app.delete('/api/clients/:id', (req, res) => {
 // ========================
 // TERMS TEMPLATES
 // ========================
+// The default template is made once per data folder (meta `templatesSeeded`),
+// so deleting it, or every template, keeps it deleted. A data folder that
+// already has templates is marked on its first visit here.
+const TEMPLATES_SEEDED_KEY = 'templatesSeeded';
 app.get('/api/templates', (req, res) => {
   let templates = readAllFromDir('templates');
-  if (templates.length === 0) {
-    // Seed default template
-    const defaultTpl = {
-      id: 'default',
-      name: 'Standard Terms',
-      content: '1. Payment is due within 15 days of invoice date unless otherwise agreed in writing.\n2. Interest @ 18% p.a. will be charged on overdue payments beyond the due date.\n3. The scope of work is limited to what is explicitly mentioned in the project proposal/agreement. Any additional requirements will be quoted and billed separately.\n4. All intellectual property and source code will be transferred to the client only upon receipt of full payment.\n5. We shall not be liable for any delays caused by incomplete or late submission of content, credentials, or approvals from the client\'s end.\n6. Any change requests after project approval may attract additional charges and revised timelines.\n7. This invoice is subject to the jurisdiction of courts at the service provider\'s registered location.\n8. E. & O.E.'
-    };
-    writeJSON(path.join(DATA_DIR, 'templates', 'default.json'), defaultTpl);
-    templates = [defaultTpl];
+  // An unreadable meta.json is never rewritten here (its counters would go).
+  const meta = readJSON(META_PATH, null);
+  const metaOk = meta !== null || !fs.existsSync(META_PATH);
+  if (metaOk && !meta?.[TEMPLATES_SEEDED_KEY]) {
+    if (templates.length === 0) {
+      // Seed default template
+      const defaultTpl = {
+        id: 'default',
+        name: 'Standard Terms',
+        content: '1. Payment is due within 15 days of invoice date unless otherwise agreed in writing.\n2. Interest @ 18% p.a. will be charged on overdue payments beyond the due date.\n3. The scope of work is limited to what is explicitly mentioned in the project proposal/agreement. Any additional requirements will be quoted and billed separately.\n4. All intellectual property and source code will be transferred to the client only upon receipt of full payment.\n5. We shall not be liable for any delays caused by incomplete or late submission of content, credentials, or approvals from the client\'s end.\n6. Any change requests after project approval may attract additional charges and revised timelines.\n7. This invoice is subject to the jurisdiction of courts at the service provider\'s registered location.\n8. E. & O.E.'
+      };
+      writeJSON(path.join(DATA_DIR, 'templates', 'default.json'), defaultTpl);
+      templates = [defaultTpl];
+    }
+    writeJSON(META_PATH, { ...(meta || {}), [TEMPLATES_SEEDED_KEY]: true });
   }
   templates.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   res.json(templates);
@@ -381,7 +560,7 @@ app.get('/api/templates', (req, res) => {
 
 app.post('/api/templates', (req, res) => {
   const tpl = req.body;
-  if (!tpl.id) tpl.id = 'tpl_' + Date.now();
+  if (!tpl.id) tpl.id = newId('tpl', 'templates');
   const filePath = path.join(DATA_DIR, 'templates', safeFileName(tpl.id) + '.json');
   writeJSON(filePath, tpl);
   res.json({ success: true, id: tpl.id });
@@ -404,7 +583,7 @@ app.get('/api/products', (req, res) => {
 
 app.post('/api/products', (req, res) => {
   const product = req.body;
-  if (!product.id) product.id = 'prod_' + Date.now();
+  if (!product.id) product.id = newId('prod', 'products');
   const filePath = path.join(DATA_DIR, 'products', safeFileName(product.id) + '.json');
   writeJSON(filePath, product);
   res.json({ success: true, id: product.id });
@@ -427,7 +606,7 @@ app.get('/api/expenses', (req, res) => {
 
 app.post('/api/expenses', (req, res) => {
   const expense = req.body;
-  if (!expense.id) expense.id = 'exp_' + Date.now();
+  if (!expense.id) expense.id = newId('exp', 'expenses');
   const filePath = path.join(DATA_DIR, 'expenses', safeFileName(expense.id) + '.json');
   writeJSON(filePath, expense);
   res.json({ success: true, id: expense.id });
@@ -450,7 +629,7 @@ app.get('/api/recurring', (req, res) => {
 
 app.post('/api/recurring', (req, res) => {
   const item = req.body;
-  if (!item.id) item.id = 'rec_' + Date.now();
+  if (!item.id) item.id = newId('rec', 'recurring');
   const filePath = path.join(DATA_DIR, 'recurring', safeFileName(item.id) + '.json');
   writeJSON(filePath, item);
   res.json({ success: true, id: item.id });
@@ -473,7 +652,7 @@ app.get('/api/receipts', (req, res) => {
 
 app.post('/api/receipts', (req, res) => {
   const receipt = req.body;
-  if (!receipt.id) receipt.id = 'rcp_' + Date.now();
+  if (!receipt.id) receipt.id = newId('rcp', 'receipts');
   const filePath = path.join(DATA_DIR, 'receipts', safeFileName(receipt.id) + '.json');
   writeJSON(filePath, receipt);
   res.json({ success: true, id: receipt.id });
@@ -496,7 +675,7 @@ app.get('/api/purchases', (req, res) => {
 
 app.post('/api/purchases', (req, res) => {
   const purchase = req.body;
-  if (!purchase.id) purchase.id = 'pur_' + Date.now();
+  if (!purchase.id) purchase.id = newId('pur', 'purchases');
   const filePath = path.join(DATA_DIR, 'purchases', safeFileName(purchase.id) + '.json');
   writeJSON(filePath, purchase);
   res.json({ success: true, id: purchase.id });
@@ -519,7 +698,7 @@ app.get('/api/profiles', (req, res) => {
 
 app.post('/api/profiles', (req, res) => {
   const prof = req.body;
-  if (!prof.id) prof.id = 'biz_' + Date.now();
+  if (!prof.id) prof.id = newId('biz', 'profiles');
   const filePath = path.join(DATA_DIR, 'profiles', safeFileName(prof.id) + '.json');
   writeJSON(filePath, prof);
   res.json({ success: true, id: prof.id });
@@ -541,6 +720,18 @@ const META_PATH = path.join(DATA_DIR, 'meta.json');
 const LOCK_KEY = 'appLock';
 const withoutLock = (meta) => { const { [LOCK_KEY]: _lock, ...rest } = meta || {}; return rest; };
 const withLock = (meta, lock) => (lock ? { ...withoutLock(meta), [LOCK_KEY]: lock } : withoutLock(meta));
+// Two more keys only the server sets: the extra backup folder (through POST
+// /api/backup-folder, which checks the folder) and this install's id.
+const BACKUP_FOLDER_KEY = 'backupFolder';
+const INSTALL_ID_KEY = 'installId';
+const serverOnlyKey = (key) => key === LOCK_KEY || key === BACKUP_FOLDER_KEY || key === INSTALL_ID_KEY;
+// What belongs to this PC and never comes from (or goes into) a backup file.
+const META_LOCAL_KEYS = [LOCK_KEY, INSTALL_ID_KEY, BACKUP_FOLDER_KEY];
+const withoutLocalMeta = (meta) => {
+  const out = { ...(meta || {}) };
+  for (const k of META_LOCAL_KEYS) delete out[k];
+  return out;
+};
 
 app.get('/api/meta/:key', (req, res) => {
   if (req.params.key === LOCK_KEY) return errRes(res, 403, 'forbidden');
@@ -549,7 +740,7 @@ app.get('/api/meta/:key', (req, res) => {
 });
 
 app.post('/api/meta/:key', (req, res) => {
-  if (req.params.key === LOCK_KEY) return errRes(res, 403, 'forbidden');
+  if (serverOnlyKey(req.params.key)) return errRes(res, 403, 'forbidden');
   if (!req.body || !('value' in req.body)) return errRes(res, 400, 'bad-request');
   const meta = readJSON(META_PATH, {});
   meta[req.params.key] = req.body.value;
@@ -563,7 +754,7 @@ app.post('/api/meta/:key', (req, res) => {
 // race-free across concurrent HTTP requests. Closes the
 // "two saves both reading 5, both writing 6" duplicate-invoice-number bug.
 app.post('/api/meta/:key/increment', (req, res) => {
-  if (req.params.key === LOCK_KEY) return errRes(res, 403, 'forbidden');
+  if (serverOnlyKey(req.params.key)) return errRes(res, 403, 'forbidden');
   const meta = readJSON(META_PATH, {});
   // v1.10.78 (#93) - a tax invoice sends its start ("Start numbering from");
   // see nextCounterValue. Nothing else jumps.
@@ -672,22 +863,34 @@ app.post('/api/lock/set', (req, res) => {
 // ========================
 app.get('/api/export', (req, res) => {
   const data = {
-    bills: readAllFromDir('bills'),
-    profile: readJSON(PROFILE_PATH, DEFAULT_PROFILE),
+    bills: readAllFromDir('bills').map(billWithoutLocalFields),
+    profile: stripLocalProfileFields(readJSON(PROFILE_PATH, DEFAULT_PROFILE)),
     clients: readAllFromDir('clients'),
     termsTemplates: readAllFromDir('templates'),
     products: readAllFromDir('products'),
     expenses: readAllFromDir('expenses'),
     recurring: readAllFromDir('recurring'),
     receipts: readAllFromDir('receipts'),
-    profiles: readAllFromDir('profiles'),
+    profiles: readAllFromDir('profiles').map(stripLocalProfileFields),
     purchases: readAllFromDir('purchases'),
     // v1.10.77 - never the PIN hash: a backup file can travel (email, Drive).
-    meta: withoutLock(readJSON(META_PATH, {})),
+    // Nor this PC's install id, backup folder or Google Client ID.
+    meta: withoutLocalMeta(readJSON(META_PATH, {})),
     exportedAt: new Date().toISOString(),
   };
   res.json(data);
 });
+
+// A profile from a backup: the Client ID of the profile already on this PC
+// stays; one from the backup never comes in.
+const importedProfile = (incoming, existing) => {
+  const out = stripLocalProfileFields(incoming);
+  if (out && typeof out === 'object' && typeof existing?.googleClientId === 'string' && existing.googleClientId) {
+    out.googleClientId = existing.googleClientId;
+  }
+  return out;
+};
+const listOf = (v) => (Array.isArray(v) ? v : []);
 
 app.post('/api/import', (req, res) => {
   // v1.10.0 — Match POST /api/bills' overwrite semantics for bills.
@@ -701,8 +904,28 @@ app.post('/api/import', (req, res) => {
   // Also v1.10.31 — Data-F12.2: after any import, scan the imported bills
   // and reconcile the meta counter with each prefix's max existing suffix
   // so the next reservation doesn't collide.
+  // HC (DF-CR05): "Replace existing data" (?overwrite=1) first takes a
+  // snapshot of the live data (data/backups/pre-import-<ms>, as a restore
+  // does), never lowers a number counter, and keeps this PC's PIN, install id
+  // and backup folder. In both modes a backup never brings in a Google Client
+  // ID, an install id or a backup folder. The answer says what was really
+  // written and skipped (written, skipped, profileWritten, metaWritten,
+  // snapshot).
   const data = req.body;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return errRes(res, 400, 'bad-request');
   const overwrite = req.query.overwrite === '1' || req.query.overwrite === 'true';
+  // An unreadable meta.json is never replaced or merged (its counters could
+  // not be kept), so the import stops before anything is written.
+  const metaExists = fs.existsSync(META_PATH);
+  const localMeta = metaExists ? readJSON(META_PATH, null) : {};
+  if (localMeta === null) return errRes(res, 500, 'server-error', new Error('Import refused: meta.json cannot be read'));
+  let snapshot = null;
+  if (overwrite) {
+    try { snapshot = path.basename(snapshotLiveData('pre-import')); } catch (err) { return errRes(res, 500, 'server-error', err); }
+  }
+  let invalid = 0;
+  let profileWritten = false;
+  let metaResult = 'none';
   const counts = {
     billCount: 0, billSkipped: 0,
     clientCount: 0, clientSkipped: 0,
@@ -716,48 +939,72 @@ app.post('/api/import', (req, res) => {
   };
 
   // Helper: upsert one entity to a directory, honouring the overwrite flag.
-  const upsertOne = (dirName, entity, countKey, skipKey) => {
-    if (!entity?.id) return;
+  // `prepare` gets the entity and the copy on disk (if any) and returns what
+  // is written.
+  const upsertOne = (dirName, entity, countKey, skipKey, prepare) => {
+    if (!entity?.id) { invalid++; return; }
     const p = path.join(DATA_DIR, dirName, safeFileName(entity.id) + '.json');
-    if (!overwrite && fs.existsSync(p)) { counts[skipKey]++; return; }
-    writeJSON(p, entity);
+    const exists = fs.existsSync(p);
+    if (!overwrite && exists) { counts[skipKey]++; return; }
+    writeJSON(p, prepare ? prepare(entity, exists ? readJSON(p, null) : null) : entity);
     counts[countKey]++;
   };
 
-  // Profile is a singleton (single file); overwrite-gated same way.
-  if (data.profile) {
-    if (overwrite || !fs.existsSync(PROFILE_PATH)) {
-      writeJSON(PROFILE_PATH, data.profile);
-    }
-  }
-  (data.bills || []).forEach(b => upsertOne('bills', b, 'billCount', 'billSkipped'));
-  (data.clients || []).forEach(c => upsertOne('clients', c, 'clientCount', 'clientSkipped'));
-  (data.termsTemplates || []).forEach(t => upsertOne('templates', t, 'templateCount', 'templateSkipped'));
-  (data.products || []).forEach(p => upsertOne('products', p, 'productCount', 'productSkipped'));
-  (data.expenses || []).forEach(e => upsertOne('expenses', e, 'expenseCount', 'expenseSkipped'));
-  (data.recurring || []).forEach(r => upsertOne('recurring', r, 'recurringCount', 'recurringSkipped'));
-  (data.receipts || []).forEach(r => upsertOne('receipts', r, 'receiptCount', 'receiptSkipped'));
-  (data.profiles || []).forEach(p => upsertOne('profiles', p, 'profileCount', 'profileSkipped'));
-  (data.purchases || []).forEach(p => upsertOne('purchases', p, 'purchaseCount', 'purchaseSkipped'));
-
-  // meta.json — same gating. Previously always overwrote → counters could
-  // regress below existing bill numbers → collision loop on next save.
-  if (data.meta) {
-    if (overwrite || !fs.existsSync(META_PATH)) {
-      // The PIN on this PC stays as it is: a backup never sets, removes or
-      // brings back an old PIN.
-      writeJSON(META_PATH, withLock(withoutLock(data.meta), readJSON(META_PATH, {})[LOCK_KEY]));
-    } else {
-      // v1.10.79 (#95) - a merge keeps what is here and adds the backup's own
-      // number series and the higher of each counter, so no number is reused.
-      const meta = readJSON(META_PATH, {});
-      const series = { ...(data.meta.invoiceNumberSeries || {}), ...(meta.invoiceNumberSeries || {}) };
-      if (Object.keys(series).length) meta.invoiceNumberSeries = series;
-      for (const [k, v] of Object.entries(data.meta)) {
-        if (k.startsWith('counter_') && Number(v) > (Number(meta[k]) || 0)) meta[k] = Number(v);
+  try {
+    // Profile is a singleton (single file); overwrite-gated same way.
+    if (data.profile && typeof data.profile === 'object') {
+      const exists = fs.existsSync(PROFILE_PATH);
+      if (overwrite || !exists) {
+        writeJSON(PROFILE_PATH, importedProfile(data.profile, exists ? readJSON(PROFILE_PATH, null) : null));
+        profileWritten = true;
       }
-      writeJSON(META_PATH, meta);
     }
+    listOf(data.bills).forEach(b => upsertOne('bills', b, 'billCount', 'billSkipped', billWithoutLocalFields));
+    listOf(data.clients).forEach(c => upsertOne('clients', c, 'clientCount', 'clientSkipped'));
+    listOf(data.termsTemplates).forEach(t => upsertOne('templates', t, 'templateCount', 'templateSkipped'));
+    listOf(data.products).forEach(p => upsertOne('products', p, 'productCount', 'productSkipped'));
+    listOf(data.expenses).forEach(e => upsertOne('expenses', e, 'expenseCount', 'expenseSkipped'));
+    listOf(data.recurring).forEach(r => upsertOne('recurring', r, 'recurringCount', 'recurringSkipped'));
+    listOf(data.receipts).forEach(r => upsertOne('receipts', r, 'receiptCount', 'receiptSkipped'));
+    listOf(data.profiles).forEach(p => upsertOne('profiles', p, 'profileCount', 'profileSkipped', importedProfile));
+    listOf(data.purchases).forEach(p => upsertOne('purchases', p, 'purchaseCount', 'purchaseSkipped'));
+
+    // meta.json — same gating. Previously always overwrote → counters could
+    // regress below existing bill numbers → collision loop on next save.
+    if (data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta)) {
+      const incoming = withoutLocalMeta(data.meta);
+      if (overwrite || !metaExists) {
+        // Replace: the backup's settings win, but no counter ever goes down, a
+        // business only this PC numbers keeps its series, and this PC's PIN,
+        // install id and backup folder stay as they are (a backup never sets,
+        // removes or brings back an old PIN).
+        const meta = { ...withoutLocalMeta(localMeta), ...incoming };
+        const series = { ...(localMeta.invoiceNumberSeries || {}), ...(incoming.invoiceNumberSeries || {}) };
+        if (Object.keys(series).length) meta.invoiceNumberSeries = series;
+        for (const k of new Set([...Object.keys(localMeta), ...Object.keys(incoming)])) {
+          if (!k.startsWith('counter_')) continue;
+          const highest = Math.max(Number(localMeta[k]) || 0, Number(incoming[k]) || 0);
+          if (highest > 0) meta[k] = highest;
+        }
+        for (const k of META_LOCAL_KEYS) if (localMeta[k] !== undefined) meta[k] = localMeta[k];
+        writeJSON(META_PATH, meta);
+        metaResult = 'replaced';
+      } else {
+        // v1.10.79 (#95) - a merge keeps what is here and adds the backup's own
+        // number series and the higher of each counter, so no number is reused.
+        const meta = { ...localMeta };
+        const series = { ...(incoming.invoiceNumberSeries || {}), ...(meta.invoiceNumberSeries || {}) };
+        if (Object.keys(series).length) meta.invoiceNumberSeries = series;
+        for (const [k, v] of Object.entries(incoming)) {
+          if (k.startsWith('counter_') && Number(v) > (Number(meta[k]) || 0)) meta[k] = Number(v);
+        }
+        writeJSON(META_PATH, meta);
+        metaResult = 'merged';
+      }
+    }
+  } catch (err) {
+    // The snapshot, when one was taken, holds the data as it was before.
+    return errRes(res, 500, 'server-error', err, snapshot ? { snapshot } : undefined);
   }
 
   // v1.10.31 — Data-F12.2: reconcile meta counter with imported bill nums.
@@ -810,13 +1057,28 @@ app.post('/api/import', (req, res) => {
     console.error('Post-import counter reconciliation failed:', err);
   }
 
-  res.json({ ...counts, hasProfile: !!data.profile });
+  if (overwrite) pruneSnapshots('pre-import');
+  const total = (suffix) => Object.entries(counts).reduce((n, [k, v]) => (k.endsWith(suffix) ? n + v : n), 0);
+  res.json({
+    ...counts,
+    written: total('Count'),
+    skipped: total('Skipped'),
+    invalid,
+    profileWritten,
+    // The Settings toast lists "profile" when this is true: now only when the
+    // profile was really written (it used to mean "the file had one").
+    hasProfile: profileWritten,
+    metaWritten: metaResult !== 'none',
+    metaMode: metaResult, // 'replaced', 'merged' or 'none'
+    overwrite,
+    snapshot,
+  });
 });
 
 // ========================
 // Save PDF to local folder
 // ========================
-const INVOICES_DIR = path.join(__dirname, 'Saved Invoices');
+const INVOICES_DIR = path.join(APP_HOME, 'Saved Invoices');
 if (!fs.existsSync(INVOICES_DIR)) fs.mkdirSync(INVOICES_DIR, { recursive: true });
 
 app.post('/api/save-pdf', express.raw({ type: 'application/pdf', limit: '20mb' }), (req, res) => {
@@ -848,7 +1110,7 @@ app.post('/api/save-pdf', express.raw({ type: 'application/pdf', limit: '20mb' }
     // Don't leak absolute FS path — client only needs to know it saved
     // and where (relative). Absolute path revealed OS username +
     // install dir to any origin.
-    res.json({ saved: true, relPath: path.relative(__dirname, filePath).split(path.sep).join('/') });
+    res.json({ saved: true, relPath: path.relative(APP_HOME, filePath).split(path.sep).join('/') });
   } catch (err) {
     errRes(res, 500, 'server-error', err);
   }
@@ -906,11 +1168,21 @@ function findSavedPdfs(fileName, clientName) {
   return out;
 }
 
+const PDF_PRODUCT = 'HC Fashion House';
 async function stampCancelled(bytes) {
-  // Loaded here, not at start-up: if pdf-lib were ever missing (a failed
-  // update), only this stamp would fail, never the whole app.
+  // Loaded here, not at start-up: if pdf-lib were ever missing (a damaged
+  // install), only this stamp would fail, never the whole app.
   const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib');
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  // updateMetadata: false - pdf-lib would otherwise write itself (with its
+  // project's web address) into the file's properties. The copy keeps its own
+  // properties and names this app as the program that changed it.
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  try {
+    doc.setProducer(PDF_PRODUCT);
+    doc.setCreator(PDF_PRODUCT);
+    if (!doc.getAuthor()) doc.setAuthor(PDF_PRODUCT);
+    doc.setModificationDate(new Date());
+  } catch { /* odd properties never stop the stamp */ }
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
   const text = 'CANCELLED';
   const angle = 30;
@@ -963,7 +1235,7 @@ app.post('/api/saved-pdf/cancel-mark', express.json(), async (req, res) => {
 // ========================
 // Move saved PDF to Trash
 // ========================
-const TRASH_DIR = path.join(__dirname, 'Trash');
+const TRASH_DIR = path.join(APP_HOME, 'Trash');
 
 if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
 
@@ -1032,123 +1304,43 @@ app.post('/api/trash-pdf', express.json(), (req, res) => {
 });
 
 // ========================
-// Version check
+// Version
 // ========================
+// The version of this copy, for the footer, the About page and the backup
+// file. New versions are installed by the administrator; the app never looks
+// for one itself.
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
 
 app.get('/api/version', (req, res) => {
   res.json({ current: pkg.version });
 });
 
-// Naive semver compare — returns +1 if a > b, -1 if a < b, 0 if equal.
-// "1.4.10" > "1.4.2" correctly (numeric parts), unlike a string compare.
-function compareSemver(a, b) {
-  const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
-  const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
-    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
-  }
-  return 0;
-}
-
-// v1.10.81 - "What's new" on the Support & About page: the CHANGELOG.md that
-// ships in every ZIP next to this file, so it works offline. The page parses
-// it (src/utils/changelog.js) and shows it as text, never as HTML.
-app.get('/api/changelog', (req, res) => {
-  fs.readFile(path.join(__dirname, 'CHANGELOG.md'), 'utf8', (err, text) => {
-    if (err) return res.json({ text: '' });
-    res.json({ text: text.slice(0, 400000) });
-  });
-});
-
-app.get('/api/check-update', async (req, res) => {
-  try {
-    // Two parallel fetches: package.json (definitive version source) and the
-    // GitHub Releases API (for release notes). Both have a 4s timeout so a
-    // flaky network can't lock the UI.
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    const [pkgRes, relRes] = await Promise.all([
-      fetch('https://raw.githubusercontent.com/IamRamgarhia/Free-GST-Billing-Software/main/package.json', { signal: ctrl.signal }).catch(() => null),
-      fetch('https://api.github.com/repos/IamRamgarhia/Free-GST-Billing-Software/releases/latest', {
-        signal: ctrl.signal,
-        headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'FreeGSTBill-update-check' },
-      }).catch(() => null),
-    ]);
-    clearTimeout(t);
-
-    let releaseNotes = null;
-    let releaseUrl = null;
-    let releasePublishedAt = null;
-    let releaseTag = null;
-    if (relRes && relRes.ok) {
-      const rel = await relRes.json();
-      releaseNotes = rel.body || null;
-      releaseUrl = rel.html_url || null;
-      releasePublishedAt = rel.published_at || null;
-      releaseTag = rel.tag_name || null;
-    }
-
-    // #105: the updater installs the latest RELEASE, so its tag is the version
-    // on offer. main's package.json can be ahead of it (merged, not released
-    // yet) and then offered an update that re-installed the same version.
-    // package.json is only the fallback when the Releases API can't be read.
-    let latest = /^v?\d+\.\d+\.\d+$/.test(releaseTag || '') ? releaseTag.replace(/^v/, '') : null;
-    if (!latest) {
-      if (!pkgRes?.ok) throw new Error('GitHub fetch failed');
-      latest = (await pkgRes.json()).version;
-    }
-    const updateAvailable = compareSemver(latest, pkg.version) > 0;
-
-    res.json({
-      current: pkg.version,
-      latest,
-      updateAvailable,
-      releaseNotes,
-      releaseUrl,
-      releasePublishedAt,
-      releaseTag,
-    });
-  } catch {
-    res.json({ current: pkg.version, latest: null, updateAvailable: false, error: 'Could not check for updates' });
-  }
-});
-
 // ============================================================
 // v1.10.44 — In-app Control Panel API
-// Powers /control-panel in the app. Each endpoint shells out to
-// a platform-appropriate script under `_system-scripts/` — the copy inside
-// `_system/` in a release install, or `release-templates/_system-scripts/`
-// when running from the source repo.
+// Powers /control-panel in the app. Each endpoint runs one of the
+// PowerShell scripts that come with the app — the copy inside `_system/`
+// in a release install, or `release-templates/_system-scripts/` when
+// running from the source repo.
 // ============================================================
 import { spawn } from 'child_process';
 
 const isWindows = process.platform === 'win32';
-const isMac = process.platform === 'darwin';
 
-// Where the launcher scripts live. In a release-ZIP install the app
-// is under `_system/` so `..` gets us to the launcher's script dir;
-// in dev the same relative path lands us at `release-templates/_system-scripts/`
-// which also holds them. If neither exists we degrade gracefully —
-// the Control Panel just shows the buttons as disabled.
-// v1.10.72 (#73) — the release ZIP has always FLATTENED the scripts into
-// _system/, right next to this file (build-release-zip.mjs copies
-// _system-scripts/* into _system/). None of the old candidates existed in a
-// ZIP install, so every user since v1.10.44 got "Launcher scripts not
-// detected", and Update / Backup / Restore / Move / Stop failed with
-// "Script not found". A folder now only counts if it really holds the update
-// script, so an unrelated folder with the right name can't be picked either.
-const SCRIPT_SUFFIX = isWindows ? '-windows.ps1' : '-unix.sh';
+// Where the launcher scripts live. v1.10.72 (#73) — the release ZIP
+// FLATTENS them into _system/, right next to this file
+// (build-release-zip.mjs copies _system-scripts/* into _system/); the
+// source repo keeps them in release-templates/_system-scripts/. A folder
+// only counts if it really holds the backup script, so an unrelated folder
+// with the right name can't be picked either. The app runs on Windows only;
+// anywhere else every action is shown as not available.
+const SCRIPT_SUFFIX = '-windows.ps1';
 const CONTROL_SCRIPT_CANDIDATES = [
   __dirname,                                                     // release ZIP: _system/
   path.join(__dirname, 'release-templates', '_system-scripts'), // source repo
-  path.join(__dirname, '_system-scripts'),                       // older layouts
-  path.join(__dirname, '..', '_system-scripts'),
 ];
-const controlScriptDir = CONTROL_SCRIPT_CANDIDATES.find(
-  p => fs.existsSync(path.join(p, `update${SCRIPT_SUFFIX}`)),
-) || null;
+const controlScriptDir = (isWindows && CONTROL_SCRIPT_CANDIDATES.find(
+  p => fs.existsSync(path.join(p, `backup${SCRIPT_SUFFIX}`)),
+)) || null;
 
 function pickScript(name) {
   if (!controlScriptDir) return null;
@@ -1156,34 +1348,50 @@ function pickScript(name) {
   return fs.existsSync(p) ? p : null;
 }
 
-// Which Control Panel actions have a script on this platform. Linux / macOS
-// ship update + backup only, so Restore / Move / Stop are shown as not
-// available there instead of failing when clicked.
-const CONTROL_ACTIONS = ['update', 'backup', 'restore', 'move', 'stop'];
+// Which Control Panel actions have a script on this PC. There is no update
+// action: new versions are installed by the administrator.
+const CONTROL_ACTIONS = ['backup', 'restore', 'move', 'stop'];
 const controlActions = () => Object.fromEntries(CONTROL_ACTIONS.map(a => [a, !!pickScript(a)]));
 
+// Restore waits on a file-picker window, so a script gets 15 minutes; after
+// that it is stopped and the page is told so.
+const CONTROL_SCRIPT_TIMEOUT_MS = 15 * 60 * 1000;
 function runControlScript(scriptPath) {
   return new Promise((resolve) => {
-    if (!scriptPath) { resolve({ ok: false, error: 'Not available here: the script for this action is not in the app folder. Download the latest ZIP to get it.' }); return; }
-    // v1.10.66 (#59) — update-unix.sh is plain POSIX sh, so it runs under `sh`
-    // and therefore also where bash does not exist (Alpine / BusyBox NAS
-    // images). The other Unix scripts use bash features and keep running under
-    // bash, found on PATH as before — /usr/local/bin/bash on TrueNAS CORE,
-    // /run/current-system/sw/bin/bash on NixOS.
-    const unixShell = path.basename(scriptPath) === 'update-unix.sh' ? 'sh' : 'bash';
-    const [cmd, args] = isWindows
-      ? ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]]
-      : [unixShell, [scriptPath]];
+    if (!scriptPath) { resolve({ ok: false, error: 'This action is not available on this installation.' }); return; }
+    let timer = null;
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    // Verdict #9: no input pipe (a script that waits for Enter gets "end of
+    // input" instead of keeping this request open for ever), and the scripts
+    // are told nobody is at the keyboard, so they skip their pauses. They
+    // work on the same folders as this server.
+    const env = { ...process.env, HCFH_NONINTERACTIVE: '1' };
+    if (HCFH_HOME) env.HCFH_HOME = APP_HOME;
+    if (String(process.env.HCFH_BACKUP_DIR || '').trim()) env.HCFH_BACKUP_DIR = BACKUPS_HOME;
     let out = '', err = '';
+    let child;
     try {
-      const child = spawn(cmd, args, { detached: false, windowsHide: false });
-      child.stdout?.on('data', d => { out += d.toString(); });
-      child.stderr?.on('data', d => { err += d.toString(); });
-      child.on('error', e => resolve({ ok: false, error: e.message }));
-      child.on('exit', code => resolve({ ok: code === 0, exitCode: code, stdout: out.slice(-4000), stderr: err.slice(-2000) }));
+      child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+        detached: false, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'], env,
+      });
     } catch (e) {
-      resolve({ ok: false, error: e.message });
+      finish({ ok: false, error: e.message });
+      return;
     }
+    timer = setTimeout(() => {
+      try { child.kill(); } catch { /* already gone */ }
+      finish({ ok: false, error: 'Timed out after 15 minutes, so the action was stopped.', stdout: out.slice(-4000), stderr: err.slice(-2000) });
+    }, CONTROL_SCRIPT_TIMEOUT_MS);
+    child.stdout?.on('data', d => { out = (out + d.toString()).slice(-65536); });
+    child.stderr?.on('data', d => { err = (err + d.toString()).slice(-65536); });
+    child.on('error', e => finish({ ok: false, error: e.message }));
+    child.on('exit', code => finish({ ok: code === 0, exitCode: code, stdout: out.slice(-4000), stderr: err.slice(-2000) }));
   });
 }
 
@@ -1202,24 +1410,25 @@ app.get('/api/control-panel/status', (req, res) => {
       return total;
     } catch { return 0; }
   })();
-  // Port is bound in startServer() below; read it back from the socket
-  // address at request time rather than relying on a module-level const
-  // that doesn't exist. Falls back to the persisted preference for the
-  // edge case where the request arrives before activeServer is set.
-  let activePort = STARTING_PORT;
-  try {
-    const addr = activeServer && activeServer.address();
-    if (addr && typeof addr === 'object' && addr.port) activePort = addr.port;
-  } catch { /* keep fallback */ }
+  // The port this request came in on, i.e. the one the server is bound to.
+  const activePort = portOf(req) || STARTING_PORT;
   res.json({
     platform: process.platform,
     node: process.version,
     controlScriptsAvailable: !!controlScriptDir,
     actions: controlActions(),
-    dataFolder: DATA_DIR,
+    // A short label, not the full path (that showed the Windows user name).
+    dataFolder: HCFH_HOME ? path.join('HCFH_HOME', 'data') : path.join(path.basename(__dirname), 'data'),
+    // Books inside a cloud-synced folder leave this PC: the page warns.
+    dataFolderSynced: !!syncedRootOf(APP_HOME),
+    // True only under the temp folder (test runs); the tests check it.
+    dataFolderIsTemp: isPathInside(DATA_DIR, os.tmpdir()),
     dataSizeBytes: dataSize,
     port: activePort,
-    launcherType: controlScriptDir ? (isWindows ? 'hta' : (isMac ? 'command' : 'sh')) : 'none',
+    // Settings the browser keeps belong to the preferred port; on any other
+    // port they are not visible, so the page can say so.
+    preferredPort,
+    launcherType: controlScriptDir ? 'hta' : 'none',
   });
 });
 
@@ -1229,29 +1438,35 @@ app.post('/api/control-panel/backup', async (req, res) => {
   res.json(result);
 });
 
+// Opens a folder of this app in Explorer (Windows only).
+function openInExplorer(folder) {
+  const child = spawn('explorer.exe', [folder], { detached: true });
+  child.on('error', () => { /* Explorer not started: nothing to clean up */ });
+  child.unref();
+}
+
 app.post('/api/control-panel/open-data-folder', (req, res) => {
+  if (!isWindows) return res.json({ ok: false, error: 'This action is not available on this installation.' });
   try {
-    if (isWindows) spawn('explorer.exe', [DATA_DIR], { detached: true }).unref();
-    else if (isMac) spawn('open', [DATA_DIR], { detached: true }).unref();
-    else spawn('xdg-open', [DATA_DIR], { detached: true }).unref();
+    openInExplorer(DATA_DIR);
     res.json({ ok: true });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
+// The folder the backup, move and restore scripts use (BACKUPS_HOME), so
+// "Open Backups Folder" shows the ZIPs they made.
 app.post('/api/control-panel/open-backups-folder', (req, res) => {
-  const backupsHome = path.join(process.env.USERPROFILE || process.env.HOME || '', 'Documents', 'FreeGSTBill Backups');
+  if (!isWindows) return res.json({ ok: false, error: 'This action is not available on this installation.' });
   try {
-    if (!fs.existsSync(backupsHome)) fs.mkdirSync(backupsHome, { recursive: true });
-    if (isWindows) spawn('explorer.exe', [backupsHome], { detached: true }).unref();
-    else if (isMac) spawn('open', [backupsHome], { detached: true }).unref();
-    else spawn('xdg-open', [backupsHome], { detached: true }).unref();
-    res.json({ ok: true, path: backupsHome });
+    ensureDir(BACKUPS_HOME);
+    openInExplorer(BACKUPS_HOME);
+    res.json({ ok: true, path: BACKUPS_HOME, synced: !!syncedRootOf(BACKUPS_HOME) });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 app.post('/api/control-panel/launch-script', async (req, res) => {
   // Whitelisted script actions the Control Panel exposes.
-  const allowed = new Set(['update', 'restore', 'move', 'stop']);
+  const allowed = new Set(['restore', 'move', 'stop']);
   const action = String(req.body?.action || '');
   if (!allowed.has(action)) { res.status(400).json({ ok: false, error: 'Unknown action' }); return; }
   const script = pickScript(action);
@@ -1266,12 +1481,16 @@ app.post('/api/control-panel/launch-script', async (req, res) => {
 // The static middleware silently no-ops when dist/ doesn't exist; the catch-all
 // then checks per-request and serves either index.html (build ready) or the
 // friendly "still building" page (build not ready). This means the server can
-// start before `vite build` finishes — common in StackBlitz, Codespaces, or
-// when a user accidentally runs `node server.js` directly — and seamlessly
-// flips to serving the app the moment dist/ appears.
+// start before `vite build` finishes — for example when `node server.js` is
+// run straight from a fresh source checkout — and seamlessly flips to serving
+// the app the moment dist/ appears.
 const distPath = path.join(__dirname, 'dist');
 const indexPath = path.join(distPath, 'index.html');
-app.use(express.static(distPath, { fallthrough: true })); // fallthrough = ok if dist doesn't exist
+app.use(express.static(distPath, {
+  fallthrough: true, // ok if dist doesn't exist
+  // Pages get the security policy as a header too (see CSP_HEADER).
+  setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Content-Security-Policy', CSP_HEADER); },
+}));
 
 // ============================================================
 // v1.9.5 — Automatic daily backup + retention (keep last 30 days).
@@ -1293,6 +1512,41 @@ function copyDirRecursive(src, dst) {
   }
 }
 
+// What in data/ is never copied into a backup or a snapshot: the backups
+// themselves (no recursion), the error log and the two port files.
+const NOT_BACKED_UP = new Set(['backups', 'errors.log', 'port.txt', 'port.run']);
+
+// A full copy of the live data taken before a restore or a replacing import
+// (data/backups/<kind>-<ms>), so either can be undone by hand. A copy that
+// fails half-way is removed again, so a partial one is never taken for whole.
+function snapshotLiveData(kind) {
+  const dir = path.join(BACKUPS_DIR, `${kind}-${Date.now()}`);
+  try {
+    ensureDir(dir);
+    for (const entry of fs.readdirSync(DATA_DIR, { withFileTypes: true })) {
+      if (NOT_BACKED_UP.has(entry.name)) continue;
+      const src = path.join(DATA_DIR, entry.name);
+      const dst = path.join(dir, entry.name);
+      if (entry.isDirectory()) copyDirRecursive(src, dst);
+      else fs.copyFileSync(src, dst);
+    }
+  } catch (err) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* left for manual cleanup */ }
+    throw err;
+  }
+  return dir;
+}
+
+// Only the 5 newest snapshots of each kind are kept.
+function pruneSnapshots(kind, keep = 5) {
+  try {
+    const re = new RegExp(`^${kind}-(\\d+)$`);
+    const snaps = fs.readdirSync(BACKUPS_DIR).filter((n) => re.test(n))
+      .sort((x, y) => Number(re.exec(x)[1]) - Number(re.exec(y)[1]));
+    while (snaps.length > keep) fs.rmSync(path.join(BACKUPS_DIR, snaps.shift()), { recursive: true, force: true });
+  } catch { /* pruning is best-effort */ }
+}
+
 // v1.10.0 — Local-timezone date, not UTC. Previous code used
 // `new Date().toISOString().split('T')[0]` which flips at midnight UTC
 // (05:30 IST) — an IST reboot at 05:29 vs 05:31 IST computed different
@@ -1303,18 +1557,34 @@ function todayLocalIso() {
 }
 
 // v1.10.80 (#99) - a second copy of every daily backup in a folder the user
-// picks (another drive, a USB disk, a synced folder), so a failed C: drive does
-// not take the backups with it. Stored in meta.json as `backupFolder`; the
-// copies go in "<folder>/FreeGSTBill Backups/<date>", 30 days kept, and are
-// listed and restorable like the ones in data/backups.
-const BACKUP_FOLDER_KEY = 'backupFolder';
-const EXTRA_BACKUP_SUBDIR = 'FreeGSTBill Backups';
+// picks (another drive or a USB disk), so a failed C: drive does not take the
+// backups with it. Stored in meta.json as `backupFolder`; the copies go in
+// "<folder>/HC Fashion House Backups/<date>", 30 days kept, and are listed
+// and restorable like the ones in data/backups.
+const EXTRA_BACKUP_SUBDIR = 'HC Fashion House Backups';
 const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
-const extraBackupsDir = () => {
+const extraBackupFolder = () => {
   const folder = readJSON(META_PATH, {})[BACKUP_FOLDER_KEY];
-  return typeof folder === 'string' && folder.trim() && path.isAbsolute(folder.trim())
-    ? path.join(folder.trim(), EXTRA_BACKUP_SUBDIR) : null;
+  return typeof folder === 'string' && folder.trim() && path.isAbsolute(folder.trim()) ? folder.trim() : null;
 };
+const extraBackupsDir = () => {
+  const folder = extraBackupFolder();
+  return folder ? path.join(folder, EXTRA_BACKUP_SUBDIR) : null;
+};
+// A cloud-synced folder would send the whole books off this PC, so it is
+// refused; a folder saved before this check gets no more copies, and Settings
+// says why. A network folder is allowed, with a warning.
+function extraFolderProblem(folder) {
+  const where = folder ? syncedRootOf(folder) : null;
+  return where
+    ? `That folder is inside ${where}, which uploads its files to the internet. Choose a folder on another drive of this PC or on a USB disk.`
+    : '';
+}
+function extraFolderWarning(folder) {
+  return /^[\\/]{2}/.test(String(folder || ''))
+    ? 'This is a network folder: copies are made only while it can be reached, and anyone with access to it can open them.'
+    : '';
+}
 let lastExtraBackupError = '';
 // v1.10.81 - which install made each copy: "<date>.from" next to it holds this
 // install's id (beside, not inside: a restore copies everything inside a
@@ -1323,9 +1593,9 @@ let lastExtraBackupError = '';
 // could bring back the other PC's books. Now that is reported instead.
 const installId = () => {
   const meta = readJSON(META_PATH, {});
-  if (typeof meta.installId === 'string' && meta.installId) return meta.installId;
+  if (typeof meta[INSTALL_ID_KEY] === 'string' && meta[INSTALL_ID_KEY]) return meta[INSTALL_ID_KEY];
   const id = crypto.randomUUID();
-  writeJSON(META_PATH, { ...meta, installId: id });
+  writeJSON(META_PATH, { ...meta, [INSTALL_ID_KEY]: id });
   return id;
 };
 const exists = (p) => fs.promises.access(p).then(() => true, () => false);
@@ -1342,8 +1612,11 @@ async function copyDirAsync(src, dst) {
 // disconnected one made the synchronous calls hang the whole server.
 let extraCopyRunning = false;
 async function copyBackupToExtraFolder(date) {
-  const dir = extraBackupsDir();
+  const folder = extraBackupFolder();
+  const dir = folder ? path.join(folder, EXTRA_BACKUP_SUBDIR) : null;
   if (!dir || extraCopyRunning) return;
+  const problem = extraFolderProblem(folder);
+  if (problem) { lastExtraBackupError = `Copies to the backup folder are paused. ${problem}`; return; }
   extraCopyRunning = true;
   try {
     const src = path.join(BACKUPS_DIR, date);
@@ -1405,8 +1678,8 @@ function runDailyBackup() {
       // v1.10.31 — Data-F7.1: `trash` is now INCLUDED in daily backups.
       // Previously excluded → users restoring last week's backup lost every
       // bill they'd trashed since, breaking the 30-day soft-delete promise.
-      // We still skip `backups` (no recursion) and log files.
-      if (entry.name === 'backups' || entry.name === 'errors.log' || entry.name === 'port.txt') continue;
+      // We still skip `backups` (no recursion), the log and the port files.
+      if (NOT_BACKED_UP.has(entry.name)) continue;
       const src = path.join(DATA_DIR, entry.name);
       const dst = path.join(target, entry.name);
       if (entry.isDirectory()) copyDirRecursive(src, dst);
@@ -1497,41 +1770,37 @@ app.post('/api/backups/:date/restore', (req, res) => {
     }
 
     // The PIN on this PC survives the restore (see withLock), and so does the
-    // backup folder setting (the backup may be older than it).
-    const lockBefore = readJSON(META_PATH, {})[LOCK_KEY];
-    const backupFolderBefore = readJSON(META_PATH, {})[BACKUP_FOLDER_KEY];
+    // backup folder setting (the backup may be older than it). So does the
+    // one-time terms seed: a default deleted here is not made again.
+    const metaBefore = readJSON(META_PATH, {});
+    const lockBefore = metaBefore[LOCK_KEY];
+    const backupFolderBefore = metaBefore[BACKUP_FOLDER_KEY];
+    const seededBefore = metaBefore[TEMPLATES_SEEDED_KEY];
 
     // Make a snapshot of live data before touching anything.
-    snapshotDir = path.join(BACKUPS_DIR, `pre-restore-${Date.now()}`);
-    ensureDir(snapshotDir);
-    const liveEntries = fs.readdirSync(DATA_DIR, { withFileTypes: true });
-    for (const entry of liveEntries) {
-      if (entry.name === 'backups' || entry.name === 'errors.log' || entry.name === 'port.txt') continue;
-      const src = path.join(DATA_DIR, entry.name);
-      const dst = path.join(snapshotDir, entry.name);
-      if (entry.isDirectory()) copyDirRecursive(src, dst);
-      else fs.copyFileSync(src, dst);
-    }
+    snapshotDir = snapshotLiveData('pre-restore');
 
-    // Now do the restore. Track what we replaced so rollback knows
-    // which dirs to nuke first.
+    // Now do the restore. Each entry goes on the rollback list BEFORE it is
+    // touched (cr#4): one whose delete or copy fails half-way is put back
+    // from the snapshot too, not left half-restored.
     const backupEntries = fs.readdirSync(backupDir, { withFileTypes: true });
     for (const entry of backupEntries) {
       const src = path.join(backupDir, entry.name);
       const dst = path.join(DATA_DIR, entry.name);
       if (!isPathInside(dst, DATA_DIR)) continue;
+      restoredDirs.push(entry.name);
       if (entry.isDirectory()) {
         if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
         copyDirRecursive(src, dst);
       } else {
         fs.copyFileSync(src, dst);
       }
-      restoredDirs.push(entry.name);
     }
     {
       const restoredMeta = withLock(readJSON(META_PATH, {}), lockBefore);
       if (backupFolderBefore) restoredMeta[BACKUP_FOLDER_KEY] = backupFolderBefore;
       else delete restoredMeta[BACKUP_FOLDER_KEY];
+      if (seededBefore) restoredMeta[TEMPLATES_SEEDED_KEY] = true;
       writeJSON(META_PATH, restoredMeta);
     }
     for (const dir of DIRS) invalidateCache(dir);
@@ -1540,18 +1809,18 @@ app.post('/api/backups/:date/restore', (req, res) => {
     // data as it was a moment ago (today's daily backup was taken at
     // start-up, before today's work), and the app promises it can be rolled
     // back. Only the 5 newest snapshots are kept.
-    try {
-      const snaps = fs.readdirSync(BACKUPS_DIR).filter(n => /^pre-restore-\d+$/.test(n)).sort((x, y) => Number(x.slice(12)) - Number(y.slice(12)));
-      while (snaps.length > 5) fs.rmSync(path.join(BACKUPS_DIR, snaps.shift()), { recursive: true, force: true });
-    } catch { /* pruning is best-effort */ }
+    pruneSnapshots('pre-restore');
     res.json({ success: true, restored: date, snapshot: path.basename(snapshotDir) });
   } catch (err) {
     // Rollback: put the snapshot back over whatever the restore
     // half-did. This preserves user data at the cost of losing the
-    // partial restore (which was probably corrupt anyway).
+    // partial restore (which was probably corrupt anyway). Entry by entry:
+    // one that cannot be put back never stops the others, and the answer
+    // names the snapshot that still holds everything.
+    let rolledBack = true;
     if (snapshotDir && fs.existsSync(snapshotDir)) {
-      try {
-        for (const name of restoredDirs) {
+      for (const name of restoredDirs) {
+        try {
           const dst = path.join(DATA_DIR, name);
           if (!isPathInside(dst, DATA_DIR)) continue;
           if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
@@ -1560,11 +1829,11 @@ app.post('/api/backups/:date/restore', (req, res) => {
             if (fs.statSync(snap).isDirectory()) copyDirRecursive(snap, dst);
             else fs.copyFileSync(snap, dst);
           }
-        }
-      } catch { /* if rollback fails, snapshot stays on disk for manual recovery */ }
+        } catch { rolledBack = false; /* this entry stays in the snapshot for manual recovery */ }
+      }
     }
     for (const dir of DIRS) invalidateCache(dir);
-    errRes(res, 500, 'server-error', err);
+    errRes(res, 500, 'server-error', err, snapshotDir ? { snapshot: path.basename(snapshotDir), rolledBack } : undefined);
   }
 });
 
@@ -1575,10 +1844,17 @@ app.post('/api/backups/:date/restore', (req, res) => {
 // one call per 5 seconds; excess return 429 with a hint.
 // v1.10.80 (#99) - the extra backup folder. GET says where it is and whether
 // the last copy worked; POST { path } sets it ('' turns it off). The folder
-// is created and test-written before it is accepted.
+// is created and test-written before it is accepted; a cloud-synced folder is
+// refused, and a network folder comes with a warning.
 app.get('/api/backup-folder', (req, res) => {
   const folder = readJSON(META_PATH, {})[BACKUP_FOLDER_KEY] || '';
-  res.json({ path: folder, copiesIn: extraBackupsDir(), error: lastExtraBackupError });
+  const problem = extraFolderProblem(folder);
+  res.json({
+    path: folder,
+    copiesIn: extraBackupsDir(),
+    error: problem ? `Copies to the backup folder are paused. ${problem}` : lastExtraBackupError,
+    warning: extraFolderWarning(folder),
+  });
 });
 app.post('/api/backup-folder', async (req, res) => {
   const raw = String(req.body?.path ?? '').trim();
@@ -1590,6 +1866,8 @@ app.post('/api/backup-folder', async (req, res) => {
     return res.json({ ok: true, path: '' });
   }
   if (!path.isAbsolute(raw)) return res.status(400).json({ ok: false, error: 'Give the full folder path, for example D:\\Backups' });
+  const problem = extraFolderProblem(raw);
+  if (problem) return res.status(400).json({ ok: false, error: problem });
   const dir = path.join(raw, EXTRA_BACKUP_SUBDIR);
   if (isPathInside(dir, DATA_DIR)) return res.status(400).json({ ok: false, error: 'Choose a folder outside the app\'s data folder.' });
   try {
@@ -1603,7 +1881,7 @@ app.post('/api/backup-folder', async (req, res) => {
   meta[BACKUP_FOLDER_KEY] = raw;
   writeJSON(META_PATH, meta);
   await runDailyBackup(); // copies today's backup there now
-  return res.json({ ok: !lastExtraBackupError, path: raw, copiesIn: dir, error: lastExtraBackupError });
+  return res.json({ ok: !lastExtraBackupError, path: raw, copiesIn: dir, error: lastExtraBackupError, warning: extraFolderWarning(raw) });
 });
 
 let __lastBackupNowMs = 0;
@@ -1683,9 +1961,11 @@ setInterval(purgeOldTrash, 24 * 60 * 60 * 1000);
 // v1.10.0 — Health-check endpoint moved here (was registered AFTER the
 // SPA catch-all → every GET /api/health returned "No such endpoint" →
 // the UI's health-banner was permanently broken). Now registered
-// before the catch-all so it actually serves.
+// before the catch-all so it actually serves. It says whether errors.log has
+// recent entries, but no longer returns them: stack traces carry the PC's
+// folder paths.
 app.get('/api/health', (req, res) => {
-  let errorsTail = '';
+  let hasRecentErrors = false;
   try {
     if (fs.existsSync(ERRORS_LOG)) {
       const stat = fs.statSync(ERRORS_LOG);
@@ -1695,22 +1975,27 @@ app.get('/api/health', (req, res) => {
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, Math.max(0, stat.size - len));
       fs.closeSync(fd);
-      errorsTail = buf.toString('utf-8');
+      hasRecentErrors = !!buf.toString('utf-8').trim();
     }
   } catch { /* ignore */ }
   res.json({
     ok: true,
-    version: process.env.npm_package_version || 'unknown',
+    version: pkg.version,
     uptimeSec: Math.round(process.uptime()),
     pid: process.pid,
-    hasRecentErrors: !!errorsTail.trim(),
-    errorsTail,
+    hasRecentErrors,
   });
 });
 
+// These folders hold files only. A missing file there is a 404, never the
+// app page with status 200, which the service worker would then keep for a
+// year in place of the real file (OCR stayed broken after it came back).
+const FILE_ONLY_PATHS = /^\/(assets|tesseract|fonts|icons|brand)\//;
 app.get('{*path}', (req, res) => {
   if (req.path.startsWith('/api')) return res.status(404).json({ error: 'No such endpoint' });
+  if (FILE_ONLY_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not found');
   if (fs.existsSync(indexPath)) {
+    res.setHeader('Content-Security-Policy', CSP_HEADER);
     return res.sendFile(indexPath);
   }
   // Build not ready yet — serve friendly waiting page (auto-refreshes every 3s).
@@ -1719,8 +2004,9 @@ app.get('{*path}', (req, res) => {
 
 function servePlaceholder(req, res) {
     if (req.path.startsWith('/api')) return res.status(404).json({ error: 'No such endpoint' });
+    res.setHeader('Content-Security-Policy', CSP_HEADER);
     res.status(503).send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Free GST Billing Software — building…</title>
+<html><head><meta charset="utf-8"><title>HC Fashion House — building…</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: -apple-system, Segoe UI, Inter, sans-serif; max-width: 560px;
@@ -1735,17 +2021,13 @@ function servePlaceholder(req, res) {
   .box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.85rem 1rem; border-radius: 8px; margin-top: 1rem; }
 </style></head>
 <body>
-  <h1>Free GST Billing Software</h1>
+  <h1>HC Fashion House</h1>
   <p><span class="spinner"></span> The app is still building. This page refreshes every 3 seconds.</p>
   <div class="box">
     <p style="margin:0 0 0.5rem"><strong>Local install?</strong></p>
     <p style="margin:0">If you started the server but never built the frontend, run:</p>
     <p style="margin:0.5rem 0 0"><code>npm run build</code></p>
     <p class="muted" style="margin:0.5rem 0 0">…then reload this page.</p>
-  </div>
-  <div class="box">
-    <p style="margin:0 0 0.5rem"><strong>StackBlitz / Codespaces?</strong></p>
-    <p style="margin:0">First-time build takes ~30 seconds inside browser sandboxes. Sit tight.</p>
   </div>
   <p class="muted" style="margin-top:1.5rem">Server is running on port ${req.socket.localPort} · API health: <a href="/api/version">/api/version</a></p>
 </body></html>`);
@@ -1821,19 +2103,50 @@ process.on('unhandledRejection', (err) => logFatal(err, 'unhandledRejection'));
 // Try ports starting from STARTING_PORT (persisted preference) until one is available.
 // Bound to 127.0.0.1 explicitly so the server can NEVER be reached from the LAN —
 // every byte stays on the user's machine, which the privacy promise depends on.
-let activeServer = null;
+const busyPorts = new Set(); // ports found taken on the way up
+let ownsPortRun = false;
 function startServer(port) {
   const server = app.listen(port, '127.0.0.1', () => {
     activeServer = server;
-    // Persist the chosen port — the .bat launcher reads this for the browser URL.
-    // Writing on EVERY successful boot means: if our preferred 47371 was busy and
-    // we landed on 47372 instead, next launch tries 47372 first (cuts collision
-    // scans in half on repeated reboots of whatever was holding 47371).
-    try { fs.writeFileSync(PORT_FILE, String(port), 'utf-8'); } catch { /* ignore */ }
-    console.log(`\n  Free GST Billing Software running at http://localhost:${port}`);
+    // The real port: with `0` the OS picks it (that used to be written as "0").
+    listeningPort = server.address().port;
+    // port.txt is written once, on the first start of this data folder, with
+    // the port that start got (never an OS-picked one). After that only a
+    // person changes it, so a second copy or a test run cannot move the
+    // address under which the browser keeps this shop's settings.
+    if (port !== 0 && !fs.existsSync(PORT_FILE)) {
+      try { fs.writeFileSync(PORT_FILE, String(listeningPort), 'utf-8'); preferredPort = listeningPort; } catch { /* ignore */ }
+    }
+    // port.run: the port in use now, for the launcher, Stop and the Vite dev
+    // proxy. Left alone when it names a port found taken on the way up where
+    // the app answers: that is the copy already running from this folder, and
+    // it keeps its address. (A port.run left by a forced stop is replaced.)
+    const writePortRun = () => {
+      try { fs.writeFileSync(PORT_RUN_FILE, String(listeningPort), 'utf-8'); ownsPortRun = true; } catch { /* ignore */ }
+    };
+    let running = 0;
+    try { running = parseInt(fs.readFileSync(PORT_RUN_FILE, 'utf-8').trim(), 10) || 0; } catch { /* none yet */ }
+    if (running && running !== listeningPort && busyPorts.has(running)) {
+      fetch(`http://127.0.0.1:${running}/api/version`, { signal: AbortSignal.timeout(2000) })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then((v) => {
+          if (typeof v?.current === 'string') console.warn(`  Another copy of the app is already running from this folder, on port ${running}.`);
+          else writePortRun();
+        });
+    } else {
+      writePortRun();
+    }
+    console.log(`\n  HC Fashion House running at http://localhost:${listeningPort}`);
     console.log(`  Data stored in: ${DATA_DIR}\n`);
+    const synced = syncedRootOf(APP_HOME);
+    if (synced) {
+      console.warn(`  Warning: this folder is inside ${synced}, so the books, PDFs and backups in it`);
+      console.warn('  are uploaded to the internet. Install the app in a folder on this PC instead.\n');
+    }
   });
   server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') busyPorts.add(port);
     if (err.code === 'EADDRINUSE' && port < STARTING_PORT + MAX_PORT_SCAN) {
       console.log(`  Port ${port} is busy, trying ${port + 1}...`);
       startServer(port + 1);
@@ -1872,6 +2185,14 @@ function gracefulShutdown(signal) {
 }
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+// port.run goes with the server that wrote it. A forced stop (Stop Server)
+// leaves it behind, naming a port that no longer answers.
+process.on('exit', () => {
+  if (!ownsPortRun) return;
+  try {
+    if (fs.readFileSync(PORT_RUN_FILE, 'utf-8').trim() === String(listeningPort)) fs.unlinkSync(PORT_RUN_FILE);
+  } catch { /* gone already */ }
+});
 
 // =====================================================
 // Recurring invoices — auto-fire on boot + daily interval
@@ -1886,9 +2207,9 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 // fires here. The frontend would only see it if the user happened to open the
 // app between firings — fragile.
 //
-// Why no Windows scheduled task (yet): the server starts on every Windows
-// login via the Startup-folder shortcut, so booting your PC = a check.
-// Long-uptime users get a daily `setInterval` below as a backstop.
+// Why no Windows scheduled task (yet): the server checks every time it
+// starts (opening the app = a check), and hourly while it keeps running
+// (the `setInterval` below).
 // Calendar arithmetic on YYYY-MM-DD, done in UTC so the machine's time zone
 // can never move the date. (It used to parse the date as UTC, step it in
 // local time and print it as UTC again: a day off west of Greenwich.)

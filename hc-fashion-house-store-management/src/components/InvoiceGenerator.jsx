@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
-import { ArrowLeft, Plus, Trash2, Download, UserPlus, Pencil, Settings, ChevronUp, ChevronDown, MessageCircle, Check, Loader, Truck, Printer, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Download, UserPlus, Pencil, Settings, ChevronUp, ChevronDown, MessageCircle, Check, Loader, Truck, Printer, Eye, EyeOff, CloudUpload } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { saveBill, deleteBill, applyStockChanges, getNextInvoiceNumber, getTermsTemplates, getAllClients, saveClient, getProfile, getAllProducts, getInvoiceDisplayOptions, saveInvoiceDisplayOptions, getAllProfiles, getRegionMode, saveRecurring, getAllRecurring, getAllBills } from '../store';
-import { INVOICE_TYPES, businessKeyOf, GST_DOC_NUMBER, COUNTRIES, printedSubtotal, deliveryChargeLine, stockEffect, appliedStock, stockDelta, generateEWayBillJSON, formatCurrency, getCountryConfig, getStatesForCountry, getAllUnits, addCustomUnit, removeCustomUnit, getCountriesForRegion, TDS_SECTIONS, TCS_SECTIONS, REMOVED_TCS_SECTIONS, TERMS_PRESETS, getActiveAccounts, getDefaultAccount, getAccountById, getDefaultUnitForMode, filterUnitsByMode, PAPER_SIZES, getPaperSize, computeInvoiceTotals, clientYearToDate, htmlHasText, ORDER_DETAIL_FIELDS, invoiceOptionOn, DEFAULT_DECLARATION, decodeGstin, safePageBoundaries, localToday, toLocalIsoDate, parseLocalDate, paymentStatusFor } from '../utils';
+import { saveBill, deleteBill, applyStockChanges, getNextInvoiceNumber, getTermsTemplates, getAllClients, saveClient, getProfile, getAllProducts, getInvoiceDisplayOptions, saveInvoiceDisplayOptions, getAllProfiles, getRegionMode, saveRecurring, getAllRecurring, getAllBills, getEnabledModules } from '../store';
+import { INVOICE_TYPES, businessKeyOf, GST_DOC_NUMBER, COUNTRIES, printedSubtotal, deliveryChargeLine, stockEffect, appliedStock, stockDelta, generateEWayBillJSON, formatCurrency, getCountryConfig, getStatesForCountry, getAllUnits, addCustomUnit, removeCustomUnit, getCountriesForRegion, TDS_SECTIONS, TCS_SECTIONS, REMOVED_TCS_SECTIONS, TERMS_PRESETS, getActiveAccounts, getDefaultAccount, getAccountById, getDefaultUnitForMode, filterUnitsByMode, PAPER_SIZES, getPaperSize, computeInvoiceTotals, clientYearToDate, htmlHasText, ORDER_DETAIL_FIELDS, invoiceOptionOn, DEFAULT_DECLARATION, decodeGstin, safePageBoundaries, localToday, toLocalIsoDate, parseLocalDate, paymentStatusFor, isModuleEnabled } from '../utils';
 import { getPrintSettings, savePrintSettings } from '../utils/printSettings';
 import { openWhatsAppShare } from '../utils/share';
 import { confirmAction, promptAction } from './ConfirmModal';
@@ -69,7 +69,7 @@ function RichEditor({ value, onChange, placeholder, toolbar = false }) {
             const url = await promptAction({
               title: 'Insert link',
               message: 'Paste the URL to link to. Selected text will become the link.',
-              placeholder: 'https://example.com',
+              placeholder: 'The full web address, starting with https',
               confirmLabel: 'Insert',
             });
             if (url) applyFormat('createLink', url);
@@ -85,6 +85,18 @@ function RichEditor({ value, onChange, placeholder, toolbar = false }) {
         data-placeholder={placeholder} />
     </>
   );
+}
+
+// Terms templates written in Settings are plain text, but the Terms box and
+// the invoice treat the text as HTML: a literal "<city>" (the HC Fashion House
+// Store Terms ask for the city to be filled in) was read as a tag and dropped,
+// printing "Subject to  jurisdiction.". Plain text is escaped before it goes
+// in; a template that already holds HTML formatting is used as it is.
+const TERMS_HTML_TAG = /<\/?(?:p|div|br|hr|ul|ol|li|strong|b|em|i|u|s|sub|sup|small|span|a|font|h[1-6]|table|thead|tbody|tr|td|th|blockquote|pre|code|img)\b/i;
+function termsTemplateHtml(content) {
+  const text = String(content || '');
+  if (TERMS_HTML_TAG.test(text)) return text;
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // Load draft from sessionStorage
@@ -897,7 +909,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
     return items.some(item => (item.name || '').trim() && (item.quantity || 0) * (item.rate || 0) > 0);
   }, [client?.name, items, editingBill]);
 
-  // v1.10.58 — reported (#47 item 1, @sangwanmail-eng): "New invoice save
+  // v1.10.58 — reported (#47 item 1): "New invoice save
   // and print without client name and without any product add."
   //
   // isMeaningfulInvoice() above already encoded exactly the right rule, but
@@ -1062,7 +1074,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       setTermsTemplates(templates);
       if (templates.length > 0 && blankNewInvoice.current && !selectedTermsId) {
         setSelectedTermsId(templates[0].id);
-        setCustomTerms(templates[0].content);
+        setCustomTerms(termsTemplateHtml(templates[0].content));
       }
     });
     getAllClients().then(clients => {
@@ -1269,7 +1281,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
 
   const isIssuedInvoice = !!editingBill && !editingBill._isDuplicate && !editingBill._convertToType;
 
-  // v1.10.68 (#68, idea from @deppen12) — the GSTIN already names the state and
+  // v1.10.68 (#68) — the GSTIN already names the state and
   // carries a checksum, so fill the state and catch a typo without any API key
   // or internet. The state decides place of supply: get it wrong and the
   // invoice charges CGST + SGST where it owes IGST, or the other way round.
@@ -1495,7 +1507,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
   const handleTermsSelect = (templateId) => {
     setSelectedTermsId(templateId);
     const tpl = termsTemplates.find(t => t.id === templateId);
-    if (tpl) setCustomTerms(tpl.content);
+    if (tpl) setCustomTerms(termsTemplateHtml(tpl.content));
   };
 
   const selectSavedClient = (cli) => {
@@ -1905,7 +1917,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
         return null;
       }
       if (err?.status === 409) {
-        // v1.10.23 — reported (GH #16): "A bill with this invoice number
+        // v1.10.23 — reported (#16): "A bill with this invoice number
         // already exists" on create/update/status-change/add-payment. Root
         // cause: the atomic counter can lag behind the actual bills on
         // disk (backup restore, cross-tab save, hand-crafted bill numbers)
@@ -2098,29 +2110,6 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
     return run;
   };
 
-  // Upload PDF to Google Drive if configured
-  const uploadToGoogleDrive = async (pdfBlob, fileName) => {
-    try {
-      const latestProfile = await getProfile();
-      const clientId = latestProfile.googleClientId;
-      const folderName = latestProfile.googleDriveFolder || 'GST Billing Invoices';
-      if (!clientId) return;
-
-      const hasToken = await ensureToken(clientId);
-      if (!hasToken) {
-        toast('Google Drive: Please reconnect in Settings', 'warning');
-        return;
-      }
-
-      const folderId = await findOrCreateFolder(folderName);
-      await uploadPDF(fileName, pdfBlob, folderId);
-      toast(`Saved to Google Drive → ${folderName}`, 'success');
-    } catch (err) {
-      console.error('Google Drive upload error:', err);
-      toast('Google Drive upload failed: ' + err.message, 'warning');
-    }
-  };
-
   // Shared PDF generation helper. v1.10.3 — wraps the whole body in
   // try/finally so `scalerEl.style.transform` is always restored, even
   // if html2canvas or jsPDF throws mid-render. Prior code only restored
@@ -2214,7 +2203,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       try { await document.fonts.ready; } catch { /* non-fatal */ }
     }
 
-    // v1.10.60 — reported (#51, @sguptagzb): "when I try to print the
+    // v1.10.60 — reported (#51): "when I try to print the
     // Invoice, the format is not coming as it comes in Preview", with a
     // sample PDF attached.
     //
@@ -2800,6 +2789,17 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       }
     }
 
+    // PDF properties (jsPDF leaves them blank): the invoice number as the
+    // title, the shop as author and creator. Set here, on the PDF that is
+    // returned, because the thermal path above replaces the first one.
+    // savedId is the number the bill was just saved under (every output saves
+    // first); a new invoice only has a peeked number before that.
+    pdf.setProperties({
+      title: String(savedId.current || details.invoiceNumber || ''),
+      author: 'HC Fashion House',
+      creator: 'HC Fashion House',
+    });
+
     return pdf;
   };
 
@@ -3167,8 +3167,10 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
     const invoiceDate = details.invoiceDate ? new Date(details.invoiceDate) : new Date();
     const monthName = invoiceDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
     const params = new URLSearchParams({ name: fileName, client: client?.name || 'General', month: monthName });
+    // The answer is read to the end: the API is sent with Cache-Control:
+    // no-store, and Edge / Chrome keep an unread answer open.
     return fetch(`/api/save-pdf?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: pdfBlob })
-      .then((r) => { if (!r.ok) throw new Error(`save-pdf ${r.status}`); });
+      .then(async (r) => { await r.arrayBuffer().catch(() => {}); if (!r.ok) throw new Error(`save-pdf ${r.status}`); });
   };
 
   // v1.10.76 (#83) - reported: editing an invoice and pressing Save updated
@@ -3212,7 +3214,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       if (!(readOnlyDoc && editingBill?.status === 'cancelled')) saveToInvoicesFolder(pdfBlob, fileName).catch(() => {});
 
       toast(`Invoice downloaded & saved to Saved Invoices/${clientName}/`, 'success');
-      uploadToGoogleDrive(pdfBlob, fileName);
+      // Nothing is uploaded from here: only "Save to Drive" (below) uploads.
 
       // v1.10.3 — auto-print via the shared printViaIframe helper.
       // v1.10.5 — also fire when the loaded client has autoPrint=true,
@@ -3227,6 +3229,75 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       toast('Failed to generate PDF.', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Google Drive, the shop's own account, opt-in. "Save to Drive" is the only
+  // path that uploads anything: Save & Download, Print and Ctrl+P never do.
+  // The button shows only while the Google Drive module is on (Settings →
+  // Modules) and a Google Client ID is saved in Settings.
+  const [driveModuleOn] = useState(() => isModuleEnabled('googleDrive', getEnabledModules()));
+  const [driveClientId, setDriveClientId] = useState('');
+  const [driveBusy, setDriveBusy] = useState(false);
+  useEffect(() => {
+    if (!driveModuleOn) return;
+    getProfile().then((p) => setDriveClientId(String(p?.googleClientId || '').trim())).catch(() => {});
+  }, [driveModuleOn]);
+  const canSaveToDrive = driveModuleOn && !!driveClientId;
+
+  // Builds the PDF exactly as Save & Download does (saved first, same file
+  // name, same Saved Invoices copy), then uploads it. No download, no auto-print.
+  const saveToDrive = async () => {
+    if (!printRef.current || saving || driveBusy) return;
+    const problem = validateForSave();
+    if (problem) { toast(problem, 'warning'); return; }
+    if (!isModuleEnabled('googleDrive', getEnabledModules())) {
+      toast('Google Drive is turned off in Settings → Modules. Nothing was uploaded.', 'warning');
+      return;
+    }
+    setSaving(true);
+    setDriveBusy(true);
+    let step = 'connect';
+    try {
+      const latestProfile = await getProfile();
+      const clientId = String(latestProfile?.googleClientId || '').trim();
+      const folderName = String(latestProfile?.googleDriveFolder || '').trim() || 'HC Fashion House Invoices';
+      if (!clientId) {
+        setDriveClientId('');
+        toast('Google Drive: add your Google Client ID in Settings first. Nothing was uploaded.', 'warning');
+        return;
+      }
+      // Sign in first, straight from the click (so Google's window is not
+      // blocked as a pop-up) and before anything is saved. ensureToken always
+      // settles, also when that window is closed or blocked.
+      if (!(await ensureToken(clientId))) {
+        toast('Google Drive sign-in did not finish. Allow pop-ups for this app or connect Google Drive in Settings, then try again. Nothing was uploaded.', 'warning', 8000);
+        return;
+      }
+      // From here on, the same steps as Save & Download (generatePDF).
+      step = 'save';
+      const savedNumber = await saveForOutput();
+      if (!savedNumber) return;
+      step = 'pdf';
+      const pdf = await withPreviewOnScreen(() => buildPDF());
+      const fileName = `${typeConfig.prefix}_${savedNumber.replace(/\//g, '-')}.pdf`;
+      const pdfBlob = pdf.output('blob');
+      if (!(readOnlyDoc && editingBill?.status === 'cancelled')) saveToInvoicesFolder(pdfBlob, fileName).catch(() => {});
+      step = 'upload';
+      const folderId = await findOrCreateFolder(folderName);
+      await uploadPDF(fileName, pdfBlob, folderId);
+      toast(`Saved to Google Drive → ${folderName}`, 'success');
+    } catch (err) {
+      console.error('Save to Drive failed:', err);
+      // Google's own reason, as a sentence ("... (HTTP 403)." etc.).
+      const why = err?.message ? ` ${String(err.message).trim().replace(/([^.!?])$/, '$1.')}` : '';
+      if (step === 'upload') toast(`Google Drive upload failed.${why} The invoice is saved; try Save to Drive again.`, 'error', 8000);
+      else if (step === 'pdf') toast('Failed to generate PDF. Nothing was uploaded.', 'error');
+      else if (step === 'save') toast('Save failed — nothing was uploaded. Try again.', 'error');
+      else toast(`Could not connect to Google Drive.${why} Nothing was saved or uploaded.`, 'error', 8000);
+    } finally {
+      setSaving(false);
+      setDriveBusy(false);
     }
   };
 
@@ -3250,6 +3321,8 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       `*Total: ${total}*`,
     ];
     if (businessName) lines.push('', `— ${businessName}`);
+    // share.js hands the message to WhatsApp Desktop, copies it as the
+    // fallback, and shows the toast saying which of the two happened.
     openWhatsAppShare(client?.phone, lines.join('\n'));
   };
 
@@ -3285,7 +3358,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
       <div className="generator-toolbar">
         <div className="flex gap-2 items-center">
           <button className="btn btn-secondary" onClick={handleBack}><ArrowLeft size={18} /> Back</button>
-          <HelpButton title="Invoice Generator — how to use" doc="invoices">
+          <HelpButton title="Invoice Generator — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>Invoice type</strong> — Tax Invoice / Proforma / Bill of Supply / Composition / Credit Note / Delivery Challan. Switching type refreshes the number to that type's counter (or your custom prefix from Print Settings).</li>
               <li><strong>Line items</strong> — start typing to auto-complete from your Products list. HSN autofills the GST rate for common codes. Click "+ Add description" for a detailed note under the item name.</li>
@@ -3294,6 +3367,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
               <li><strong>Hide Preview</strong> — gives the form the full width for long invoices. Show Preview brings it back.</li>
               <li><strong>Keyboard</strong> — Ctrl+S save · Ctrl+P PDF · Ctrl+Enter add row · Ctrl+Shift+D duplicate last row · Esc close leave modal.</li>
               <li><strong>Saving</strong> — a new invoice is stored when you first click Save, Save &amp; Download or Print. After that, changes save automatically. Leaving with unsaved changes asks first.</li>
+              <li><strong>Save to Drive</strong> — shown only when Google Drive is set up in Settings. It saves the invoice and uploads its PDF to your own Google Drive. Save &amp; Download and Print never upload.</li>
             </ul>
           </HelpButton>
           {/* v1.10.37 — Auto-save status pill. Reported: prior plain
@@ -3366,8 +3440,8 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
               without downloading to know Ctrl+S. Now: Save is the
               PRIMARY action, Download PDF is secondary. Save-only
               also fires the same "save to Saved Invoices/ folder"
-              + auto-print + Drive sync side effects that generatePDF
-              does — minus the PDF file. */}
+              + auto-print side effects that generatePDF does —
+              minus the PDF file. */}
           <button className="btn btn-primary" onClick={async () => {
             // v1.10.58 (#47) — refuse a blank invoice. Saving reserves an
             // invoice number, so an empty save leaves a permanent gap in a
@@ -3405,6 +3479,13 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
             }>
             <Printer size={18} /> Print
           </button>
+          {/* Only with Google Drive set up (module on + Client ID); see saveToDrive. */}
+          {canSaveToDrive && (
+            <button className="btn btn-secondary" onClick={saveToDrive} disabled={saving}
+              title="Save the invoice and upload its PDF to your own Google Drive">
+              <CloudUpload size={18} /> {driveBusy ? 'Saving to Drive…' : 'Save to Drive'}
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={shareWhatsApp} disabled={saving} style={{ background: '#25d366', color: '#fff', borderColor: '#25d366' }}>
             <MessageCircle size={18} /> WhatsApp
           </button>
@@ -3413,13 +3494,13 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
               <Truck size={18} /> E-Way Bill
             </button>
           )}
-          {/* v1.10.65 — requested (#58 item 2, @sangwanmail-eng): "to access
+          {/* v1.10.65 — requested (#58 item 2): "to access
               show preview and hide preview button once you are at the bottom
               of the page, you have to scroll all page."
               Moved here beside E-Way Bill, and this whole toolbar is now
               sticky (see .generator-toolbar), so it — and Save, Print and the
               rest — stay reachable from anywhere on a long invoice. */}
-          {/* v1.10.69 - requested (#71 item 1, @sangwanmail-eng): "Can we move
+          {/* v1.10.69 - requested (#71 item 1): "Can we move
               the Customize button so that it appears before the Show Preview
               button?"
               It used to sit in the Invoice Type card, which scrolls away. Here
@@ -4668,6 +4749,7 @@ export default function InvoiceGenerator({ onBack, profile: profileProp, editing
         onClose={() => setShowPrintPreview(false)}
         onPrint={executePrint}
         onDownloadPdf={generatePDF}
+        onSaveToDrive={canSaveToDrive ? saveToDrive : undefined}
         cancelled={editingBill?.status === 'cancelled'}
         profile={profile}
         client={client}

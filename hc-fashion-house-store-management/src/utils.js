@@ -55,7 +55,7 @@ export const formatCurrency = (amount, currency = 'INR') => {
 
 // v1.10.66 (#63) — CSV cells that start with = + - @ (or a tab / carriage
 // return) are run as FORMULAS by Excel, LibreOffice and Google Sheets. A client
-// or item named `=HYPERLINK("http://evil.example","Invoice")` turned into a
+// or item named `=HYPERLINK("<link>","Invoice")` turned into a
 // live link inside an exported ledger. Such text is prefixed with an
 // apostrophe so the spreadsheet shows it as plain text. Plain numbers —
 // including negatives such as a credit note's -500.00 — are left alone so the
@@ -605,7 +605,7 @@ export const safePageBoundaries = (edges, keepWhole) => {
   return [...new Set(edges)].filter((y) => !inside(y)).sort((a, b) => a - b);
 };
 
-// v1.10.67 (#66 item 7, @sangwanmail-eng) — which documents are actual sales.
+// v1.10.67 (#66 item 7) — which documents are actual sales.
 // A proforma/estimate is only a quote and a delivery challan moves goods
 // without selling them, so neither is turnover. A credit note reduces it. A
 // cancelled document counts for nothing at all (#66 item 12).
@@ -782,16 +782,6 @@ export const markUnpaidPatch = (bill) => {
   return { payments, paidAmount, status: paymentStatusFor(bill, paidAmount) };
 };
 
-// The online documentation. Help buttons link straight to the section for
-// their screen, and the sidebar User Guide opens the start (v1.10.75). The
-// build of docs-site checks that every doc="page#section" used in src exists.
-export const DOCS_URL = 'https://dicecodes.com/free-gst-software-documentation/';
-export const docsLink = (doc = '') => {
-  const [page, section] = String(doc).split('#');
-  if (!page || page === 'index') return DOCS_URL + (section ? `#${section}` : '');
-  return `${DOCS_URL}${page}.html${section ? `#${section}` : ''}`;
-};
-
 // GSTR-1 B2C Large: an inter-state sale to an unregistered buyer above this
 // invoice value is reported invoice by invoice. The limit fell from ₹2.5 lakh
 // to ₹1 lakh for invoices from 1 August 2024 (Notification 12/2024-CT).
@@ -915,7 +905,7 @@ const GST_STATE_CODES = {
   'telangana': '36', 'ladakh': '38',
 };
 
-// v1.10.68 (#68, idea from @deppen12) — a GSTIN carries its own facts, so the
+// v1.10.68 (#68) — a GSTIN carries its own facts, so the
 // state can be filled in and a typo caught without any API key or internet:
 //   27 ABCDE1234F 2 Z 5
 //   |  |          | | +- checksum over the first 14 characters
@@ -1375,7 +1365,7 @@ export const PAPER_SIZES = {
 // second argument to get width/height overrides applied.
 // v1.10.51 — Does this rich-text HTML contain any actual visible text?
 //
-// Adapted from a fix proposed by @venkateshpabbati in #38. The previous
+// Adapted from a fix proposed in #38. The previous
 // idiom, duplicated in five places, was:
 //
 //     html.replace(/<[^>]*>/g, '').trim()
@@ -1437,7 +1427,7 @@ export const getPaperSize = (key, options = {}) => {
 //
 //   getFinancialYearStart(new Date('2027-01-15')) === 2026   (FY 2026-27)
 //   getFinancialYearStart(new Date('2027-04-01')) === 2027   (FY 2027-28)
-// v1.10.60 — reported (#50, @sangwanmail-eng): "Terms and conditions show
+// v1.10.60 — reported (#50): "Terms and conditions show
 // as paragraph in formatted".
 //
 // The 13 built-in presets all use real <ul>/<li> markup and render as
@@ -1489,7 +1479,7 @@ export const findSameBusiness = (list, p, loaded = null) => {
     || (loaded && name && norm(loaded.businessName) === name ? loaded : null);
 };
 
-// v1.10.64 — requested (#55, @sangwanmail-eng): "keep both companies' data
+// v1.10.64 — requested (#55): "keep both companies' data
 // stored and displayed separately based on their respective GST numbers. An
 // invoice belonging to one company should not appear under the other."
 //
@@ -1506,8 +1496,8 @@ export const findSameBusiness = (list, p, loaded = null) => {
 //     the worst failure available.
 //   * Every invoice, however old, stores the seller's details at save time
 //     under `data.profile`, so the GSTIN is always there to match on.
-//   * It survives a rename. This user has invoices reading "Dice Codes" and
-//     "Anahat Exclusive" under one GSTIN — the same business, renamed. GSTIN
+//   * It survives a rename. Invoices reading "Old Name Traders" and
+//     "New Name Retail" under one GSTIN are the same business, renamed. GSTIN
 //     keeps them together; matching on name would have split them in two.
 //
 // A business with no GSTIN yet (not registered, or mid-setup) falls back to
@@ -1891,7 +1881,7 @@ export const FEATURE_GROUPS = [
       { id: 'gstReturns', label: 'GSTR-1 / GSTR-3B exports + filing guide', nav: 'filing', defaultOn: true, indiaOnly: true },
       { id: 'ewayBill',   label: 'E-Way Bill JSON export', nav: null, defaultOn: true, indiaOnly: true },
       { id: 'tdsTcs',     label: 'TDS / TCS on invoices', nav: null, defaultOn: false, indiaOnly: true },
-      { id: 'incomeTax',  label: 'Income Tax Helper (regime calc + bank import)', nav: 'incometax', defaultOn: true, indiaOnly: true },
+      { id: 'incomeTax',  label: 'Income Tax Helper (regime calc + bank import)', nav: 'incometax', defaultOn: false, indiaOnly: true },
     ],
   },
   {
@@ -1908,7 +1898,7 @@ export const FEATURE_GROUPS = [
     label: 'Integrations',
     description: 'Cloud backup and payment QR codes',
     modules: [
-      { id: 'googleDrive', label: 'Google Drive backup', nav: null, defaultOn: true },
+      { id: 'googleDrive', label: 'Google Drive (Save to Drive)', nav: null, defaultOn: false },
       { id: 'upiQr',       label: 'UPI QR code on invoices', nav: null, defaultOn: true, indiaOnly: true },
     ],
   },

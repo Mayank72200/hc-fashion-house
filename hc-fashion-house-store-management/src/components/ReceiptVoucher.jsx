@@ -8,6 +8,13 @@ import { confirmAction } from './ConfirmModal';
 import HelpButton from './HelpButton';
 
 const PAYMENT_MODES = ['Bank Transfer', 'UPI', 'Cash', 'Cheque', 'Card', 'Other'];
+// Bills store a payment's mode as an id; this form, and the receipts made
+// here, use the label.
+const MODE_IDS = { 'Bank Transfer': 'bank-transfer', 'UPI': 'upi', 'Cash': 'cash', 'Cheque': 'cheque', 'Card': 'card', 'Other': 'other' };
+// A receipt made from a Dashboard payment holds the id ('bank-transfer'). The
+// form shows it as its label, so saving an edit keeps the mode instead of
+// turning it into "other".
+const modeLabel = (mode) => Object.keys(MODE_IDS).find((label) => MODE_IDS[label] === mode) || mode || 'Bank Transfer';
 
 // date is filled in when the form opens (localToday): set here it was the
 // day the app was loaded, in UTC.
@@ -100,7 +107,7 @@ export default function ReceiptVoucher() {
       clientName: rcp.clientName || '',
       clientAddress: rcp.clientAddress || '',
       amount: String(rcp.amount ?? ''),
-      paymentMode: rcp.paymentMode || 'Bank Transfer',
+      paymentMode: modeLabel(rcp.paymentMode),
       referenceNo: rcp.referenceNo || '',
       againstInvoice: rcp.againstInvoice || '',
       note: rcp.note || '',
@@ -163,11 +170,20 @@ export default function ReceiptVoucher() {
       // silently — receipts against ad-hoc payments (advances, deposits)
       // aren't tied to any bill.
       // v1.10.16 — Edit mode: find the previously-propagated payment record
-      // in the linked bill (matched by receiptNo) and update it in place
-      // instead of appending. Prevents double-counting when a receipt is
-      // edited. If the linked invoice was changed, we remove the old
-      // propagation and add a fresh one to the new invoice.
-      const modeMap = { 'Bank Transfer': 'bank-transfer', 'UPI': 'upi', 'Cash': 'cash', 'Cheque': 'cheque', 'Card': 'card', 'Other': 'other' };
+      // in the linked bill and update it in place instead of appending.
+      // Prevents double-counting when a receipt is edited. If the linked
+      // invoice was changed, we remove the old propagation and add a fresh
+      // one to the new invoice.
+      // The payment is found by the receipt's id, which payments recorded on
+      // the Dashboard (and receipts made here) carry. Matching only the receipt
+      // number in the form - which can be edited, and which older Dashboard
+      // payments do not have - added a second payment on the first edit
+      // (D-071). A payment without the id is found by the number the receipt
+      // had before this edit. A new receipt still matches by its number.
+      const originalNo = existing?.receiptNo || '';
+      const isThisReceipt = (p) => !!p && (editingId
+        ? p.id === editingId || (!!originalNo && p.receiptNo === originalNo)
+        : p.receiptNo === receiptNo);
       const paidAmount = parseFloat(form.amount);
       // A cancelled invoice stays cancelled (un-cancel it on the Dashboard,
       // which also fixes its stock); otherwise paid once the payments cover
@@ -176,7 +192,7 @@ export default function ReceiptVoucher() {
       const stripReceiptFromBill = async (bill) => {
         if (!bill) return;
         const priorPayments = bill.payments || [];
-        const kept = priorPayments.filter(p => p.receiptNo !== receiptNo);
+        const kept = priorPayments.filter(p => !isThisReceipt(p));
         if (kept.length === priorPayments.length) return;
         const newTotal = kept.reduce((s, p) => s + (Number(p.amount) || 0), 0);
         await saveBill({ ...bill, paidAmount: newTotal, status: statusFor(bill, newTotal), payments: kept }, { overwrite: true });
@@ -185,8 +201,7 @@ export default function ReceiptVoucher() {
       // the old link first.
       if (editingId) {
         try {
-          const original = receipts.find(r => r.id === editingId);
-          const oldRef = original?.againstInvoice?.trim();
+          const oldRef = existing?.againstInvoice?.trim();
           const newRef = form.againstInvoice?.trim();
           if (oldRef && oldRef !== newRef) {
             const oldBill = bills.find(b => b.invoiceNumber === oldRef || b.id === oldRef);
@@ -201,7 +216,7 @@ export default function ReceiptVoucher() {
           if (!bill) unmatchedRef = form.againstInvoice.trim(); // v1.10.74 - tell the user below
           if (bill) {
             const priorPayments = bill.payments || [];
-            const priorIdx = priorPayments.findIndex(p => p.receiptNo === receiptNo);
+            const priorIdx = priorPayments.findIndex(isThisReceipt);
             const nextEntry = {
               // The receipt's id, as payments recorded on the Dashboard carry
               // theirs: editing or deleting the payment there then updates this
@@ -209,14 +224,18 @@ export default function ReceiptVoucher() {
               id: receipt.id,
               amount: paidAmount,
               date: form.date,
-              mode: modeMap[form.paymentMode] || 'other',
+              mode: MODE_IDS[form.paymentMode] || 'other',
               note: `Receipt ${receiptNo}${form.referenceNo ? ' · ref ' + form.referenceNo : ''}`,
               recordedAt: priorIdx >= 0 ? priorPayments[priorIdx].recordedAt : new Date().toISOString(),
               receiptNo,
             };
-            const nextPayments = priorIdx >= 0
+            let nextPayments = priorIdx >= 0
               ? priorPayments.map((p, i) => i === priorIdx ? nextEntry : p)
               : [...priorPayments, nextEntry];
+            // An edit leaves one payment per receipt: a second copy that the
+            // number-only match added before is dropped too, so the bill's paid
+            // amount comes right again.
+            if (editingId && priorIdx >= 0) nextPayments = nextPayments.filter((p, i) => i === priorIdx || !isThisReceipt(p));
             const newTotal = nextPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
             await saveBill({ ...bill, paidAmount: newTotal, status: statusFor(bill, newTotal), payments: nextPayments }, { overwrite: true });
           }
@@ -311,7 +330,7 @@ export default function ReceiptVoucher() {
             <h1 className="page-title">Receipts</h1>
             <p className="page-subtitle">Generate payment receipts for clients</p>
           </div>
-          <HelpButton title="Receipts — how to use" doc="receipts">
+          <HelpButton title="Receipts — how to use">
             <ul style={{ paddingLeft: '1.1rem', margin: 0 }}>
               <li><strong>New Receipt</strong>: pick an unpaid invoice to fill in the client, amount and invoice number.</li>
               <li>When <strong>Against Invoice</strong> matches one of your invoice numbers, the payment is also recorded on that invoice.</li>
@@ -339,7 +358,7 @@ export default function ReceiptVoucher() {
             {unpaidBills.length > 0 && !form.againstInvoice && (
               <div style={{ marginBottom: '1rem' }}>
                 <label className="form-label">Quick Select — Unpaid Invoices</label>
-                {/* v1.10.57 — reported (#44 item 2, @sangwanmail-eng):
+                {/* v1.10.57 — reported (#44 item 2):
                     "payment receipt overlapped". This capped the height of
                     `.client-picker`, which has no overflow handling — the
                     class that scrolls is `.client-picker-list`. Ten unpaid

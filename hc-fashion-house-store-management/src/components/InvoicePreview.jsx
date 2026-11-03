@@ -76,7 +76,7 @@ const InvoicePreview = React.forwardRef(({ profile: profileProp, client, details
   const showSignatoryText = opt('showSignatoryText');
   const showTerms = opt('showTerms');
   const showNotes = opt('showNotes');
-  // v1.10.70 - requested (#72, @sangwanmail-eng). OFF unless chosen: most
+  // v1.10.70 - requested (#72). OFF unless chosen: most
   // invoices are signed, and this line would contradict a signature.
   const showSystemGeneratedNote = opt('showSystemGeneratedNote', false);
   const showAmountWords = opt('showAmountWords');
@@ -506,6 +506,12 @@ const InvoicePreview = React.forwardRef(({ profile: profileProp, client, details
       || 'Thank you for your business!';
     const tagline = eff.thermalTagline || '';
     const thermalCompact = !!eff.thermalCompact;
+    // Terms & Conditions print on receipts too: the exchange / return policy
+    // is why a customer keeps the bill. Same sanitising as the sheet layouts
+    // (DOMPurify, then the numbered-list split) and the same Customize toggle;
+    // always at the end of the roll, because a receipt has no separate page.
+    const thermalTermsHtml = showTerms && customTerms ? splitNumberedTerms(DOMPurify.sanitize(customTerms)) : '';
+    const showThermalTerms = htmlHasText(thermalTermsHtml);
 
     // Base font-size in px based on paper width + user preference.
     // Larger widths get slightly bigger base so 80mm reads bolder than 58mm.
@@ -837,6 +843,16 @@ const InvoicePreview = React.forwardRef(({ profile: profileProp, client, details
         {showNotes && customNotes && (
           <div style={{ padding: secPad, fontSize: '0.9em', fontWeight: baseWeight, ...dashLine }}
             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customNotes) }} />
+        )}
+
+        {/* Terms in small black type, no grey .inv-terms class (it fades on
+            thermal paper). list-style-position: inside keeps list numbers on
+            the roll, because the global CSS reset removes the list indent. */}
+        {showThermalTerms && (
+          <div style={{ padding: secPad, fontSize: '0.85em', fontWeight: baseWeight, wordBreak: 'break-word', listStylePosition: 'inside', ...dashLine }}>
+            <div style={{ fontWeight: strongWeight, textAlign: 'center', marginBottom: 2 }}>{cap(getLabel(_ps_labels, 'terms'))}</div>
+            <div dangerouslySetInnerHTML={{ __html: thermalTermsHtml }} />
+          </div>
         )}
 
         {footerMessage && (

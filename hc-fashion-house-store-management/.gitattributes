@@ -1,15 +1,17 @@
-# Shell / macOS launchers MUST have LF endings, otherwise they fail
-# with "bad interpreter: /usr/bin/env^M" on macOS and Linux when
-# extracted from a Windows-created ZIP.
-*.sh          text eol=lf
-*.command     text eol=lf
-*.bash        text eol=lf
-
-# PowerShell scripts and .bat files can be either but Windows tools
-# prefer CRLF — keep them Windows-native.
+# PowerShell scripts, batch files and the HTA launcher run only on Windows,
+# so keep them Windows-native (CRLF). They must also stay pure ASCII
+# (scripts/build-release-zip.mjs checks that).
 *.ps1         text eol=crlf
 *.bat         text eol=crlf
 *.cmd         text eol=crlf
 
 # HTA runs via mshta.exe on Windows — CRLF is fine.
 *.hta         text eol=crlf
+
+# Binary files whose exact bytes matter (the OCR model's SHA-256 is pinned):
+# never let git touch their line endings.
+*.traineddata binary
+*.woff2       binary
+*.ico         binary
+*.png         binary
+*.jpg         binary

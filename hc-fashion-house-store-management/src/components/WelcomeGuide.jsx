@@ -18,12 +18,12 @@ export default function WelcomeGuide({ onComplete }) {
   const [profile, setProfile] = useState({
     businessName: '', address: '', city: '', pin: '', state: '', country: 'India', gstin: '', pan: '',
     email: '', phone: '', bankName: '', accountNumber: '', ifsc: '', swift: '',
-    logo: '', signature: '', upiId: '', googleClientId: '', googleDriveFolder: 'GST Billing Invoices',
+    logo: '', signature: '', upiId: '', googleClientId: '', googleDriveFolder: 'HC Fashion House Invoices',
   });
-  // v1.10.67 (#66 item 2, @sangwanmail-eng) — this is an India-first GST app,
-  // so India is the default. It used to be chosen from the browser locale, and
-  // a Windows set to en-US started people on "Outside India" with a United
-  // States company profile. The other two options are one click away.
+  // v1.10.67 — this is an India-first GST app, so India is the default. It
+  // used to be chosen from the browser locale, and a Windows set to en-US
+  // started people on "Outside India" with a United States company profile.
+  // The other two options are one click away.
   const [region, setRegion] = useState('india');
   const [saving, setSaving] = useState(false);
   const cc = getCountryConfig(profile.country);
@@ -74,7 +74,7 @@ export default function WelcomeGuide({ onComplete }) {
         }],
       } : profile;
       await saveProfile(profileToSave);
-      localStorage.setItem('freegstbill_onboarded', 'true');
+      try { localStorage.setItem('freegstbill_onboarded', 'true'); } catch { /* storage blocked: the saved profile already ends the guide */ }
       toast('Setup complete! Start creating invoices.', 'success');
       onComplete(profileToSave);
     } catch {
@@ -84,7 +84,7 @@ export default function WelcomeGuide({ onComplete }) {
   };
 
   const handleSkip = () => {
-    localStorage.setItem('freegstbill_onboarded', 'true');
+    try { localStorage.setItem('freegstbill_onboarded', 'true'); } catch { /* storage blocked: still let the user in */ }
     onComplete(null);
   };
 
@@ -112,12 +112,12 @@ export default function WelcomeGuide({ onComplete }) {
           {/* Step 0: Welcome */}
           {step === 0 && (
             <div style={{ textAlign: 'center' }}>
-              <div style={{ width: '64px', height: '64px', borderRadius: '16px', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
-                <FileText size={32} color="white" />
-              </div>
-              <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text-primary)' }}>Welcome to Free GST Billing Software</h1>
+              <img src="/brand/hc-badge-256.png" width="120" height="120" alt=""
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                style={{ display: 'block', margin: '0 auto 1.5rem' }} />
+              <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text-primary)' }}>Welcome to HC Fashion House</h1>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', lineHeight: 1.6 }}>
-                Free, open-source GST billing software that runs 100% on your computer. Your data never leaves your machine.
+                Billing, stock and GST software for HC Fashion House. It runs on this computer and keeps your business data here.
               </p>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem', textAlign: 'left' }}>
@@ -125,7 +125,7 @@ export default function WelcomeGuide({ onComplete }) {
                   { title: 'Create Invoices', desc: 'Tax Invoice, Proforma, Credit Note, Bill of Supply, Delivery Challan' },
                   { title: 'Auto GST Calculation', desc: 'CGST/SGST for same state, IGST for different state — automatic' },
                   { title: 'GST Filing Ready', desc: 'GSTR-1, GSTR-3B, HSN reports auto-generated. Download CSVs for portal.' },
-                  { title: '100% Private', desc: 'All data stored locally as files. No cloud, no signup, no tracking.' },
+                  { title: 'Stored on this PC', desc: 'Invoices and settings are files in the app\'s data folder. No signup.' },
                 ].map((item, i) => (
                   <div key={i} style={{ padding: '1rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
                     <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--text-primary)' }}>{item.title}</div>
@@ -320,7 +320,7 @@ export default function WelcomeGuide({ onComplete }) {
 
               <div style={{ padding: '1rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', marginBottom: '1.5rem' }}>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  All your data is stored locally in the <code style={{ background: 'var(--border-color)', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>data/</code> folder on this computer. Nothing is sent to any server. You can export a full backup anytime from Settings.
+                  All your data is stored in the <code style={{ background: 'var(--border-color)', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>data/</code> folder on this computer. You can export a full backup anytime from Settings.
                 </div>
               </div>
             </div>

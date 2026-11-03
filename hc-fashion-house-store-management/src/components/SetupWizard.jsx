@@ -32,8 +32,12 @@ const setDefaultPaperSize = async (paperSize) => {
 export default function SetupWizard({ onClose }) {
   const [step, setStep] = useState(1);
   const [selectedBiz, setSelectedBiz] = useState('');
-  const [paperSize, setPaperSize] = useState('a4');
-  const [language, setLanguage] = useState('en');
+  // Paper size starts unpicked and the language at the current one, so
+  // Finish writes only what is chosen here. Starting at A4 / English reset a
+  // thermal or Hindi setup when someone just clicked through to Finish.
+  const [paperSize, setPaperSize] = useState('');
+  const [initialLanguage] = useState(() => getPrintSettings().labelLanguage || 'en');
+  const [language, setLanguage] = useState(initialLanguage);
 
   // v1.10.6 — audit L9. Prior code let `finish()` with no business
   // preset selected behave identically to `skip()` — user got two
@@ -70,14 +74,14 @@ export default function SetupWizard({ onClose }) {
     toast('Setup skipped — use the "Finish setup" pill to come back to it.', 'info');
     onClose();
   };
-  const canFinish = !!selectedBiz || !!paperSize || language !== 'en';
+  const canFinish = !!selectedBiz || !!paperSize || language !== initialLanguage;
 
   return (
     <div className="modal-overlay" style={{ zIndex: 9999 }}>
       <div className="modal-content" style={{ maxWidth: '640px', maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.35rem' }}>👋 Welcome to Free GST Billing</h2>
+            <h2 style={{ margin: 0, fontSize: '1.35rem' }}>👋 Welcome to HC Fashion House</h2>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               Step {step} of 3 · Takes 90 seconds
             </p>
@@ -205,9 +209,9 @@ export default function SetupWizard({ onClose }) {
 
             <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: '0.9rem' }}>
               <Row label="Business type" value={selectedBiz ? BUSINESS_PRESETS[selectedBiz]?.label : '(none — manual config)'} />
-              <Row label="Default paper size" value={PAPER_LABELS[paperSize] || paperSize} />
+              <Row label="Default paper size" value={paperSize ? (PAPER_LABELS[paperSize] || paperSize) : '(unchanged)'} />
               <Row label="Section label language" value={
-                { en: 'English', hi: 'हिन्दी', ta: 'தமிழ்', mr: 'मराठी', bn: 'বাংলা' }[language]
+                { en: 'English', hi: 'हिन्दी', ta: 'தமிழ்', mr: 'मराठी', bn: 'বাংলা', custom: 'Custom labels' }[language]
               } />
             </div>
 

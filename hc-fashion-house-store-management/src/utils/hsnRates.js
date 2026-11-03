@@ -19,7 +19,7 @@
 // Common HSN codes for goods (4 or 6 digit).
 // Curated for coverage — priority given to categories used by design
 // agencies, retail shops, IT freelancers, food vendors, garment
-// traders and general contractors (nvwork-design's cohort).
+// traders and general contractors.
 export const HSN_RATES = {
   // ─── Food & Grocery (0% or 5%) ──────────────────────────────────
   '0401': { rate: 0,    label: 'Fresh milk' },

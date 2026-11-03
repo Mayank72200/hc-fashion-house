@@ -1,7 +1,7 @@
 // v1.10.77 (#84) - settings that lived ONLY in this browser's storage are now
 // also kept in the app's data folder, and put back if the browser loses them.
 //
-// Reported: "Welcome to Free GST Billing pops up repeatedly" and "Region
+// Reported: "the welcome screen pops up repeatedly" and "Region
 // Preference saved as India is back to Both/Auto after a restart". Print &
 // PDF settings (including "setup finished"), Region, Features, custom units,
 // GST "filed" marks and the income-tax inputs were stored only in the
@@ -13,7 +13,7 @@
 // data folder (data/local-prefs.json, server.js /api/local-prefs) is restored
 // before the app first renders, for keys the browser no longer has.
 
-const MIRRORED = /^(gst_printSettings|gst_regionMode|gst_enabledModules|gst_customUnits|gst_dashboardColumns|gst_filing_status(_.*)?|gst_itr[A-Za-z]*|freegstbill_onboarded|freegstbill_theme|freegstbill_startedDismissed|freegstbill_supportNudge|freegstbill_welcomeCard|freegstbill_starBanner|freegstbill_sidebarAutoHide)$/;
+const MIRRORED = /^(gst_printSettings|gst_regionMode|gst_enabledModules|gst_customUnits|gst_dashboardColumns|gst_filing_status(_.*)?|gst_itr[A-Za-z]*|freegstbill_onboarded|freegstbill_theme|freegstbill_startedDismissed|freegstbill_sidebarAutoHide)$/;
 const ENDPOINT = '/api/local-prefs';
 
 export const isMirrored = (key) => MIRRORED.test(String(key));
@@ -51,7 +51,10 @@ const push = () => {
     }
   } catch { return; }
   dirty.clear();
-  fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ set, remove }) }).catch(() => {});
+  // The answer is read to the end: the API is sent with Cache-Control:
+  // no-store, and Edge / Chrome keep an unread answer open.
+  fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ set, remove }) })
+    .then((res) => res.arrayBuffer()).catch(() => {});
 };
 const touch = (k) => { dirty.add(k); clearTimeout(timer); timer = setTimeout(push, 600); };
 
